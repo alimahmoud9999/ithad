@@ -1,0 +1,3203 @@
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+} from 'react';
+import {
+  Apartment,
+  ApartmentObligation,
+  AppNotification,
+  AppSubscriptionInvoice,
+  Building,
+  BuildingSubscriptionStatus,
+  CashRecipientType,
+  ClaimDistributionType,
+  EmergencyClaim,
+  Expense,
+  FeaturesConfig,
+  Payment,
+  PaymentCategoryType,
+  PaymentMethodType,
+  PaymentStatusType,
+  PlanTier,
+  SubscriptionPlan,
+  UserProfile,
+  UserRole,
+} from '../types/database';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isSupabaseConfigured, secureRpc, supabase } from '../lib/supabase';
+import {
+  dispatchPushNotification,
+  registerAndSavePushTokenAsync,
+  subscribeToNativeNotifications,
+} from '../services/notificationService';
+
+export interface ReviewedResidentEntry {
+  status: 'active' | 'rejected';
+  phone?: string;
+  apartmentNumber?: string;
+  fullName?: string;
+  buildingId?: string;
+  reviewedAt: string;
+}
+
+// ============================================================================
+// Initial Seed State Matching "برج الأمل السكني" from design/stitch_/
+// ============================================================================
+
+const INITIAL_PLANS: SubscriptionPlan[] = [
+  {
+    code: 'free',
+    name_ar: 'الباقة الأساسية (Free)',
+    description_ar:
+      'مناسبة للعقارات الصغيرة لتتبع الاشتراكات النقدية والمصروفات الأساسية.',
+    default_monthly_price: 0,
+    max_apartments: 10,
+    default_features_config: {
+      receipt_upload: false,
+      emergency_claims: false,
+      export_reports: false,
+      voting: false,
+      maintenance_tickets: true,
+      documents_archive: false,
+    },
+    is_active: true,
+  },
+  {
+    code: 'pro',
+    name_ar: 'الباقة الاحترافية (Pro)',
+    description_ar:
+      'الباقة القياسية لاتحادات الملاك (مجانية لأول 60 يوماً عند تأسيس العمارة).',
+    default_monthly_price: 150,
+    max_apartments: 30,
+    default_features_config: {
+      receipt_upload: true,
+      emergency_claims: true,
+      export_reports: true,
+      voting: true,
+      maintenance_tickets: true,
+      documents_archive: true,
+    },
+    is_active: true,
+  },
+  {
+    code: 'plus',
+    name_ar: 'باقة الأبراج والمجمعات (Plus)',
+    description_ar:
+      'سعة شقق كبيرة للأبراج السكنية مع تفعيل كافة المميزات المتقدمة.',
+    default_monthly_price: 300,
+    max_apartments: 120,
+    default_features_config: {
+      receipt_upload: true,
+      emergency_claims: true,
+      export_reports: true,
+      voting: true,
+      maintenance_tickets: true,
+      documents_archive: true,
+    },
+    is_active: true,
+  },
+];
+
+const DEFAULT_EMPTY_BUILDING: Building = {
+  id: '',
+  name: 'لم يتم تسجيل أو اختيار عقار بعد',
+  address: '',
+  city: '',
+  registration_number: '',
+  building_code: '',
+  admin_id: '',
+  fund_balance: 0,
+  default_monthly_dues: 0,
+  total_apartments: 0,
+  plan_code: 'pro',
+  subscription_status: 'trial',
+  trial_ends_at: new Date(Date.now() + 60 * 86400000).toISOString(),
+  subscription_ends_at: new Date(Date.now() + 60 * 86400000).toISOString(),
+  custom_monthly_price: 0,
+  max_apartments_override: null,
+  features_config: {
+    receipt_upload: true,
+    emergency_claims: true,
+    export_reports: true,
+    voting: true,
+    maintenance_tickets: true,
+    documents_archive: true,
+  },
+  created_at: new Date().toISOString(),
+};
+
+const INITIAL_BUILDINGS: Building[] = [];
+
+const INITIAL_USERS: Record<UserRole, UserProfile> = {
+  admin: {
+    id: 'usr-admin-001',
+    full_name: 'رئيس الاتحاد',
+    email: 'admin@ittihad.app',
+    phone: '',
+    role: 'admin',
+    status: 'active',
+    building_id: null,
+    apartment_id: null,
+    apartment_number: '',
+    floor_number: '',
+    residency_type: 'owner_resident',
+    ownership_share_percent: 0,
+    push_token: '',
+    push_token_updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  },
+  resident: {
+    id: 'usr-res-001',
+    full_name: 'الساكن / المالك',
+    email: 'resident@ittihad.app',
+    phone: '',
+    role: 'resident',
+    status: 'active',
+    building_id: null,
+    apartment_id: null,
+    apartment_number: '302',
+    floor_number: 'الدور الثالث',
+    residency_type: 'owner_resident',
+    ownership_share_percent: 0,
+    push_token: '',
+    push_token_updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  },
+  super_admin: {
+    id: 'usr-super-000',
+    full_name: 'مالك التطبيق (Super)',
+    email: 'owner@ittihadtrust.com',
+    phone: '01000000001',
+    role: 'super_admin',
+    status: 'active',
+    building_id: null,
+    apartment_id: null,
+    apartment_number: null,
+    residency_type: 'owner_resident',
+    ownership_share_percent: 0,
+    push_token: '',
+    push_token_updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  },
+};
+
+const INITIAL_PENDING_RESIDENTS: UserProfile[] = [];
+
+const INITIAL_APARTMENTS: Apartment[] = [];
+const INITIAL_APARTMENT_OBLIGATIONS: ApartmentObligation[] = [];
+const INITIAL_PAYMENTS: Payment[] = [];
+const INITIAL_EMERGENCY_CLAIMS: EmergencyClaim[] = [];
+const INITIAL_EXPENSES: Expense[] = [];
+const INITIAL_SUBSCRIPTION_INVOICES: AppSubscriptionInvoice[] = [];
+const INITIAL_NOTIFICATIONS: AppNotification[] = [];
+
+// ============================================================================
+// Context Interface
+// ============================================================================
+
+interface AppContextType {
+  currentRole: UserRole;
+  currentUser: UserProfile;
+  isAuthenticated: boolean;
+  switchRole: (role: UserRole) => void;
+  setAuthenticated: (auth: boolean) => void;
+
+  // Data Entities
+  plans: SubscriptionPlan[];
+  buildings: Building[];
+  currentBuilding: Building;
+  apartments: Apartment[];
+  apartmentObligations: ApartmentObligation[];
+  pendingResidents: UserProfile[];
+  payments: Payment[];
+  emergencyClaims: EmergencyClaim[];
+  expenses: Expense[];
+  subscriptionInvoices: AppSubscriptionInvoice[];
+
+  // Push Notifications & In-App Notification Center State
+  expoPushToken: string;
+  notifications: AppNotification[];
+  currentRoleNotifications: AppNotification[];
+  unreadNotificationsCount: number;
+  activeBannerNotification: AppNotification | null;
+  dismissBannerNotification: () => void;
+  markAllNotificationsAsRead: () => Promise<void>;
+  markNotificationAsRead: (notificationId: string) => void;
+  sendBulkUnpaidReminder: (customMessage?: string) => Promise<{
+    remindedCount: number;
+    apartments: string[];
+  }>;
+  sendIndividualUnpaidReminder: (
+    apartmentNumber: string,
+    customMessage?: string
+  ) => Promise<void>;
+
+  // Security & Idempotency Locks
+  processingIds: Record<string, boolean>;
+  isCurrentBuildingWritable: boolean;
+  refreshData: () => Promise<void>;
+
+  // Actions (Backed by secureRpc when Supabase is configured)
+  createBuildingForAdmin: (input: {
+    fullName: string;
+    phone: string;
+    buildingName: string;
+    address: string;
+    totalApartments: number;
+    defaultMonthlyDues: number;
+    adminApartmentNumber: string;
+  }) => Promise<{ buildingCode: string }>;
+
+  requestJoinBuilding: (input: {
+    fullName: string;
+    phone: string;
+    buildingCode: string;
+    apartmentNumber: string;
+    floorNumber?: string;
+  }) => Promise<void>;
+
+  reviewResidentJoinRequest: (
+    residentId: string,
+    approve: boolean,
+    overrideApartmentNumber?: string
+  ) => Promise<void>;
+
+  transferApartmentObligations: (input: {
+    sourceApartmentId: string;
+    targetApartmentId: string;
+    obligationIds?: string[];
+    transferOccupantInfo?: boolean;
+  }) => Promise<{
+    transferredCount: number;
+    transferredAmount: number;
+    sourceApartmentNumber: string;
+    targetApartmentNumber: string;
+  }>;
+
+  addApartmentObligation: (input: {
+    apartmentId: string;
+    title: string;
+    amount: number;
+    billingMonth: string;
+    category?: PaymentCategoryType;
+    notes?: string;
+  }) => Promise<void>;
+
+  submitResidentPayment: (input: {
+    amount: number;
+    paymentMethod: PaymentMethodType;
+    billingMonth: string;
+    cashRecipient?: CashRecipientType;
+    receiptImageUrl?: string;
+    paymentCategory?: PaymentCategoryType;
+    emergencyClaimId?: string;
+    referenceNumber?: string;
+    notes?: string;
+  }) => Promise<void>;
+
+  approveResidentPayment: (paymentId: string) => Promise<void>;
+  rejectResidentPayment: (paymentId: string, reason?: string) => Promise<void>;
+  recordDirectCashPayment: (input: {
+    apartmentId: string;
+    apartmentNumber: string;
+    residentId?: string | null;
+    residentName?: string | null;
+    amount: number;
+    category: PaymentCategoryType;
+    emergencyClaimId?: string | null;
+    billingMonth: string;
+    notes?: string;
+  }) => Promise<void>;
+
+  createEmergencyClaim: (input: {
+    title: string;
+    description: string;
+    category: string;
+    targetAmount: number;
+    distributionType: ClaimDistributionType;
+    dueDate?: string;
+    defaultShareAmount?: number;
+    distributionMode?: 'occupied_only' | 'all_units' | 'equal' | 'custom';
+  }) => Promise<void>;
+
+  closeEmergencyClaimWithInvoice: (input: {
+    claimId: string;
+    invoiceImageUrl: string;
+    actualAmount?: number;
+    invoiceNumber?: string;
+    notes?: string;
+  }) => Promise<void>;
+
+  recordBuildingExpense: (input: {
+    title: string;
+    amount: number;
+    category: string;
+    description?: string;
+    invoiceImageUrl?: string;
+    invoiceNumber?: string;
+  }) => Promise<void>;
+
+  addApartmentUnit: (input: {
+    apartmentNumber: string;
+    floorNumber: string;
+    wingOrDirection: string;
+    areaSqm: number;
+    residentName?: string;
+    residentPhone?: string;
+    arrearsAmount?: number;
+  }) => Promise<void>;
+
+  updateApartmentUnit: (
+    apartmentId: string,
+    updates: {
+      apartmentNumber?: string;
+      floorNumber?: string;
+      wingOrDirection?: string;
+      areaSqm?: number;
+      residentName?: string;
+      residentPhone?: string;
+    }
+  ) => Promise<void>;
+
+  deleteApartmentUnit: (apartmentId: string) => Promise<void>;
+
+  submitAppSubscriptionInvoice: (input: {
+    planCode: PlanTier;
+    durationMonths: number;
+    receiptImageUrl: string;
+    notes?: string;
+  }) => Promise<void>;
+
+  activateBuildingSubscription: (invoiceId: string) => Promise<void>;
+
+  superAdminConfigureBuilding: (input: {
+    buildingId: string;
+    planCode?: PlanTier;
+    customMonthlyPrice?: number | null;
+    maxApartmentsOverride?: number | null;
+    featuresConfig?: Partial<FeaturesConfig>;
+    subscriptionStatus?: BuildingSubscriptionStatus;
+  }) => Promise<void>;
+
+  superAdminUpdatePlanTemplate: (
+    code: PlanTier,
+    updates: Partial<SubscriptionPlan>
+  ) => void;
+}
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [currentRole, setCurrentRole] = useState<UserRole>('admin');
+  const [isAuthenticated, setAuthenticated] = useState<boolean>(false);
+  const [usersByRole, setUsersByRole] =
+    useState<Record<UserRole, UserProfile>>(INITIAL_USERS);
+
+  const [plans, setPlans] = useState<SubscriptionPlan[]>(INITIAL_PLANS);
+  const [buildings, setBuildings] = useState<Building[]>(INITIAL_BUILDINGS);
+  const [apartments, setApartments] = useState<Apartment[]>(INITIAL_APARTMENTS);
+  const [apartmentObligations, setApartmentObligations] = useState<
+    ApartmentObligation[]
+  >(INITIAL_APARTMENT_OBLIGATIONS);
+  const [pendingResidents, setPendingResidents] = useState<UserProfile[]>(
+    INITIAL_PENDING_RESIDENTS
+  );
+  const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
+  const [emergencyClaims, setEmergencyClaims] = useState<EmergencyClaim[]>(
+    INITIAL_EMERGENCY_CLAIMS
+  );
+  const [expenses, setExpenses] = useState<Expense[]>(INITIAL_EXPENSES);
+  const [subscriptionInvoices, setSubscriptionInvoices] = useState<
+    AppSubscriptionInvoice[]
+  >(INITIAL_SUBSCRIPTION_INVOICES);
+
+  // Push Notifications & In-App Notification State
+  const [expoPushToken, setExpoPushToken] = useState<string>(
+    'ExponentPushToken[ittihad-admin-001]'
+  );
+  const [notifications, setNotifications] = useState<AppNotification[]>(
+    INITIAL_NOTIFICATIONS
+  );
+  const [activeBannerNotification, setActiveBannerNotification] =
+    useState<AppNotification | null>(null);
+
+  // In-flight lock dictionary to prevent double taps on the client in addition to DB FOR UPDATE locks
+  const [processingIds, setProcessingIds] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  // Set/Map of reviewed residents to shield approved residents against 3-second polling overwrite
+  const [reviewedResidentKeys, setReviewedResidentKeys] = useState<
+    Record<string, ReviewedResidentEntry>
+  >({});
+  const reviewedResidentKeysRef = useRef<Record<string, ReviewedResidentEntry>>({});
+
+  useEffect(() => {
+    reviewedResidentKeysRef.current = reviewedResidentKeys;
+  }, [reviewedResidentKeys]);
+
+  useEffect(() => {
+    AsyncStorage.getItem('@ittihad_reviewed_residents')
+      .then((val) => {
+        if (val) {
+          try {
+            const parsed = JSON.parse(val);
+            if (parsed && typeof parsed === 'object') {
+              setReviewedResidentKeys(parsed);
+              reviewedResidentKeysRef.current = parsed;
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const currentUser = usersByRole[currentRole];
+
+  // Load live data from Supabase tables
+  const loadDataFromSupabase = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+
+    try {
+      const [bRes, aRes, oRes, pRes, cRes, eRes, nRes, uRes, sRes] =
+        await Promise.all([
+          supabase
+            .from('buildings')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('apartments')
+            .select('*')
+            .order('apartment_number', { ascending: true }),
+          supabase
+            .from('apartment_obligations')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('payments')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('emergency_claims')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('expenses')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('notifications')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase.from('users').select('*'),
+          supabase.from('subscription_plans').select('*'),
+        ]);
+
+      if (bRes.data && bRes.data.length > 0) {
+        setBuildings(bRes.data as Building[]);
+      }
+
+      if (oRes.data) {
+        setApartmentObligations(oRes.data as ApartmentObligation[]);
+      }
+
+      const rawApts = (aRes.data as Apartment[]) || [];
+      const uList = (uRes.data as UserProfile[]) || [];
+
+      if (uList.length > 0) {
+        const reviewedMap = reviewedResidentKeysRef.current || {};
+
+        // Collect all active resident phone numbers and apartment keys in uList and reviewedMap
+        const activePhones = new Set<string>();
+        const activeApts = new Set<string>();
+
+        uList.forEach((u) => {
+          if (u.status === 'active') {
+            if (u.phone) activePhones.add(u.phone.trim());
+            if (u.apartment_number) {
+              activeApts.add(`${u.building_id || ''}_${String(u.apartment_number).trim()}`);
+              activeApts.add(String(u.apartment_number).trim());
+            }
+          }
+        });
+
+        Object.values(reviewedMap).forEach((entry) => {
+          if (entry.status === 'active') {
+            if (entry.phone) activePhones.add(entry.phone.trim());
+            if (entry.apartmentNumber) {
+              if (entry.buildingId) {
+                activeApts.add(`${entry.buildingId}_${entry.apartmentNumber.trim()}`);
+              }
+              activeApts.add(entry.apartmentNumber.trim());
+            }
+          }
+        });
+
+        // Deduplicate pending residents and exclude already approved / active users
+        const rawPending = uList.filter((u) => {
+          if (u.status !== 'pending') return false;
+          // Filter out archived test users
+          if (u.phone?.includes('archived') || u.apartment_number?.includes('archived')) return false;
+          // Exclude if locally marked approved/active or rejected
+          if (reviewedMap[u.id]) return false;
+          if (u.phone && (reviewedMap[u.phone.trim()] || activePhones.has(u.phone.trim()))) return false;
+          if (
+            u.apartment_number &&
+            (reviewedMap[`${u.building_id || ''}_${String(u.apartment_number).trim()}`] ||
+              reviewedMap[String(u.apartment_number).trim()] ||
+              activeApts.has(`${u.building_id || ''}_${String(u.apartment_number).trim()}`) ||
+              activeApts.has(String(u.apartment_number).trim()))
+          ) {
+            return false;
+          }
+          return true;
+        });
+
+        const seenPending = new Set<string>();
+        const uniquePending = rawPending.filter((u) => {
+          const key = `${(u.phone || '').trim()}_${(u.apartment_number || '').trim()}`;
+          if (seenPending.has(key)) return false;
+          seenPending.add(key);
+          return true;
+        });
+        setPendingResidents(uniquePending);
+
+        const adminUser = uList.find(
+          (u) => u.role === 'admin' && u.status === 'active'
+        );
+
+        // Prioritize ACTIVE residents so an active account is never overwritten by a pending one
+        const residentUser =
+          uList.find((u) => u.role === 'resident' && u.status === 'active') ||
+          uList.find(
+            (u) =>
+              u.role === 'resident' &&
+              !u.phone?.includes('archived') &&
+              !u.apartment_number?.includes('archived')
+          );
+
+        if (adminUser) {
+          setUsersByRole((prev) => ({ ...prev, admin: adminUser }));
+        }
+
+        if (residentUser) {
+          const aptOfResident = rawApts.find(
+            (a) =>
+              (residentUser.apartment_id && a.id === residentUser.apartment_id) ||
+              (a.resident_id && a.resident_id === residentUser.id)
+          );
+          const resolvedAptNum =
+            residentUser.apartment_number || aptOfResident?.apartment_number || '302';
+
+          setUsersByRole((prev) => {
+            const isLocallyApproved =
+              prev.resident.status === 'active' ||
+              Boolean(reviewedMap[residentUser.id]?.status === 'active') ||
+              Boolean(residentUser.phone && reviewedMap[residentUser.phone.trim()]?.status === 'active') ||
+              Boolean(residentUser.apartment_number && reviewedMap[String(residentUser.apartment_number).trim()]?.status === 'active') ||
+              residentUser.status === 'active';
+
+            return {
+              ...prev,
+              admin: adminUser || prev.admin,
+              resident: {
+                ...prev.resident,
+                ...residentUser,
+                status: isLocallyApproved ? 'active' : residentUser.status,
+                apartment_number: resolvedAptNum,
+                floor_number:
+                  residentUser.floor_number ||
+                  aptOfResident?.floor_number ||
+                  prev.resident.floor_number ||
+                  'الدور الثالث',
+              },
+            };
+          });
+        }
+      }
+
+      const rawServerPayments = (pRes.data as Payment[]) || [];
+      const serverPayments = rawServerPayments.map((p) => {
+        const apt = rawApts.find(
+          (a) =>
+            (p.apartment_id && a.id === p.apartment_id) ||
+            (p.apartment_number &&
+              String(a.apartment_number).trim() ===
+                String(p.apartment_number).trim())
+        );
+        const user = uList.find(
+          (u) =>
+            (p.resident_id && u.id === p.resident_id) ||
+            (apt && (u.id === apt.resident_id || (u.apartment_id && u.apartment_id === apt.id)))
+        );
+        const effectiveAptNum =
+          p.apartment_number || apt?.apartment_number || user?.apartment_number || '302';
+        const effectiveResName =
+          p.resident_name || user?.full_name || apt?.resident_name || apt?.occupant_name || 'الساكن / المالك';
+
+        return {
+          ...p,
+          apartment_number: effectiveAptNum,
+          resident_name: effectiveResName,
+        };
+      });
+
+      if (serverPayments.length > 0) {
+        setPayments((prev) => {
+          const serverIds = new Set(serverPayments.map((p) => p.id));
+          const localInFlight = prev.filter((p) => {
+            if (serverIds.has(p.id)) return false;
+            if (!p.id.startsWith('pay-')) return false;
+
+            // Discard local in-flight item if the server already contains a matching payment for that apartment and category
+            const isSettledOnServer = serverPayments.some((sp) => {
+              const sameApt =
+                (sp.apartment_number && p.apartment_number && String(sp.apartment_number).trim() === String(p.apartment_number).trim()) ||
+                (sp.resident_id && p.resident_id && sp.resident_id === p.resident_id);
+              if (!sameApt) return false;
+              if (sp.payment_category !== p.payment_category) return false;
+              if (p.payment_category === 'emergency_claim') {
+                return sp.emergency_claim_id === p.emergency_claim_id;
+              }
+              return sp.billing_month === p.billing_month;
+            });
+
+            return !isSettledOnServer;
+          });
+          return [...localInFlight, ...serverPayments];
+        });
+      }
+
+      if (cRes.data) {
+        setEmergencyClaims((prev) => {
+          const serverClaims = (cRes.data as EmergencyClaim[]) || [];
+          if (serverClaims.length === 0) {
+            return prev;
+          }
+          const serverIds = new Set(serverClaims.map((c) => c.id));
+          const localInFlight = prev.filter((c) => !serverIds.has(c.id));
+          return [...localInFlight, ...serverClaims];
+        });
+      }
+
+      if (eRes.data) {
+        setExpenses(eRes.data as Expense[]);
+      }
+
+      if (nRes.data) {
+        setNotifications((prev) => {
+          const rawServerNotifs = (nRes.data as AppNotification[]) || [];
+          if (rawServerNotifs.length === 0) return prev;
+          const serverNotifs = rawServerNotifs.map((n) => {
+            let role = n.recipient_role;
+            if (!role) {
+              if (n.recipient_id === usersByRole.admin.id) role = 'admin';
+              else if (n.recipient_id === usersByRole.resident.id) role = 'resident';
+              else if (n.category === 'join_request') role = 'admin';
+              else role = 'resident';
+            }
+            return {
+              ...n,
+              recipient_role: role,
+            };
+          });
+          const serverIds = new Set(serverNotifs.map((n) => n.id));
+          const localInFlight = prev.filter(
+            (n) => !serverIds.has(n.id) && n.id.startsWith('notif-')
+          );
+          return [...localInFlight, ...serverNotifs];
+        });
+      }
+
+      // Merge and calculate apartment payment status atomically to prevent flickering
+      if (rawApts.length > 0) {
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const allPayments = serverPayments.length > 0 ? serverPayments : payments;
+
+        const merged = rawApts.map((apt) => {
+          const matchedUser = uList.find(
+            (u) =>
+              (apt.resident_id && u.id === apt.resident_id) ||
+              (u.building_id === apt.building_id &&
+                String(u.apartment_number).trim() ===
+                  String(apt.apartment_number).trim())
+          );
+
+          // Find monthly payment for current month
+          const monthlyPayment = allPayments.find(
+            (p) =>
+              p.building_id === apt.building_id &&
+              String(p.apartment_number).trim() ===
+                String(apt.apartment_number).trim() &&
+              p.payment_category === 'monthly_dues' &&
+              p.billing_month === currentMonth
+          );
+
+          const computedStatus: PaymentStatusType = monthlyPayment
+            ? monthlyPayment.status
+            : (matchedUser?.role === 'admin' ? 'paid' : 'unpaid');
+
+          return {
+            ...apt,
+            resident_name: matchedUser?.full_name || apt.resident_name,
+            resident_phone: matchedUser?.phone || apt.resident_phone,
+            occupant_name: apt.occupant_name || matchedUser?.full_name,
+            occupant_phone: apt.occupant_phone || matchedUser?.phone,
+            payment_status: computedStatus,
+          };
+        });
+
+        setApartments(merged);
+      }
+
+      if (sRes.data && sRes.data.length > 0) {
+        setPlans(sRes.data as SubscriptionPlan[]);
+      }
+    } catch (err) {
+      console.warn('loadDataFromSupabase warning:', err);
+    }
+  }, [payments]);
+
+  // Sync with Supabase on mount and subscribe to Realtime public schema changes
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    loadDataFromSupabase();
+
+    const channel = supabase
+      .channel('app-realtime-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        (payload) => {
+          loadDataFromSupabase();
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const notif = payload.new as AppNotification;
+            setActiveBannerNotification(notif);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
+        (payload) => {
+          loadDataFromSupabase();
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const newUser = payload.new as UserProfile;
+            if (newUser.status === 'pending') {
+              setActiveBannerNotification({
+                id: 'notif-join-' + Date.now(),
+                building_id: newUser.building_id || '',
+                recipient_id: usersByRole.admin.id,
+                recipient_role: 'admin',
+                title: `طلب انضمام ساكن جديد (شقة ${newUser.apartment_number}) 🔔`,
+                body: `طلب الساكن (${newUser.full_name}) الانضمام لشقة رقم (${newUser.apartment_number}) وهو بانتظار موافقتك.`,
+                category: 'join_request',
+                badge_label: 'طلب انضمام معلق',
+                is_urgent: true,
+                is_read: false,
+                created_at: new Date().toISOString(),
+              });
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'payments' },
+        (payload) => {
+          loadDataFromSupabase();
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const p = payload.new as any;
+            if (p.status === 'pending') {
+              setActiveBannerNotification({
+                id: 'notif-pay-' + Date.now(),
+                building_id: p.building_id || '',
+                recipient_id: usersByRole.admin.id,
+                recipient_role: 'admin',
+                title: `إيصال سداد جديد (شقة ${p.apartment_number}) 💳`,
+                body: `قام ساكن شقة (${p.apartment_number}) برفع إيصال بقيمة ${p.amount} ج.م وهو بانتظار اعتمادك.`,
+                category: 'financial',
+                badge_label: 'سداد قيد المراجعة',
+                is_urgent: false,
+                is_read: false,
+                created_at: new Date().toISOString(),
+              });
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'apartments' },
+        () => {
+          loadDataFromSupabase();
+        }
+      )
+      .subscribe();
+
+    // 3-second live auto-polling interval so new join requests and payments appear automatically without manual refresh
+    const pollInterval = setInterval(() => {
+      loadDataFromSupabase();
+    }, 3000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
+  }, [loadDataFromSupabase, usersByRole.admin.id]);
+
+  // Register Expo Push Token on app startup & whenever role changes, and store in users table
+  useEffect(() => {
+    let isMounted = true;
+
+    registerAndSavePushTokenAsync(currentUser.id).then((token) => {
+      if (!isMounted || !token) return;
+      setExpoPushToken(token);
+      setUsersByRole((prev) => ({
+        ...prev,
+        [currentRole]: {
+          ...prev[currentRole],
+          push_token: token,
+          push_token_updated_at: new Date().toISOString(),
+        },
+      }));
+    });
+
+    const unsubscribeNative = subscribeToNativeNotifications({
+      onReceived: ({ title, body, data }) => {
+        if (!title && !body) return;
+        const targetRecipientRole = data?.recipientRole as UserRole | undefined;
+        const targetRecipientId = data?.recipientId as string | undefined;
+
+        // If this notification was targeted at a specific recipient/role and it's not the active user, don't show local banner!
+        if (targetRecipientId && targetRecipientId !== currentUser.id) {
+          return;
+        }
+        if (targetRecipientRole && targetRecipientRole !== currentRole) {
+          return;
+        }
+
+        const incoming: AppNotification = {
+          id: 'push-' + Date.now(),
+          building_id: (data?.buildingId as string) || currentUser.building_id || 'bld-amal-001',
+          recipient_id: currentUser.id,
+          recipient_role:
+            targetRecipientRole || currentRole,
+          title: title || 'إشعار جديد',
+          body: body || '',
+          category:
+            (data?.category as AppNotification['category']) || 'general',
+          badge_label: (data?.badgeLabel as string) || 'إشعار فوري',
+          is_urgent: Boolean(data?.isUrgent),
+          is_read: false,
+          created_at: new Date().toISOString(),
+        };
+        setActiveBannerNotification(incoming);
+      },
+      onResponseRole: (targetRole) => {
+        setCurrentRole(targetRole as UserRole);
+      },
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribeNative();
+    };
+  }, [currentRole, currentUser.id, currentUser.building_id]);
+
+  // Helper to append an in-app notification + show top banner + send Expo Push Notification
+  const pushAndRecordNotification = useCallback(
+    async (params: {
+      recipientId: string;
+      recipientRole: UserRole;
+      recipientPushToken?: string | null;
+      buildingId?: string | null;
+      title: string;
+      body: string;
+      category: AppNotification['category'];
+      badgeLabel: string;
+      isUrgent?: boolean;
+      metadata?: AppNotification['metadata'];
+    }) => {
+      const newNotif: AppNotification = {
+        id: 'notif-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+        building_id: params.buildingId ?? 'bld-amal-001',
+        recipient_id: params.recipientId,
+        recipient_role: params.recipientRole,
+        title: params.title,
+        body: params.body,
+        category: params.category,
+        badge_label: params.badgeLabel,
+        is_urgent: Boolean(params.isUrgent),
+        is_read: false,
+        created_at: new Date().toISOString(),
+        metadata: params.metadata,
+      };
+
+      setNotifications((prev) => [newNotif, ...prev]);
+
+      if (isSupabaseConfigured) {
+        supabase
+          .from('notifications')
+          .insert({
+            building_id:
+              params.buildingId ?? currentUser.building_id ?? 'bld-amal-001',
+            recipient_id: params.recipientId || null,
+            title: params.title,
+            body: params.body,
+            category: params.category,
+            metadata: params.metadata || {},
+          })
+          .then(({ error }) => {
+            if (error) {
+              console.warn('Failed to persist notification to Supabase:', error.message);
+            }
+          });
+      }
+
+      // Only trigger in-app banner and local OS notification on this device IF current user is the actual recipient
+      const isCurrentUserRecipient =
+        params.recipientId === currentUser.id ||
+        (Boolean(params.metadata?.apartment_number) &&
+          Boolean(currentUser.apartment_number) &&
+          String(params.metadata?.apartment_number).trim() ===
+            String(currentUser.apartment_number).trim()) ||
+        (Array.isArray(params.metadata?.target_apartments) &&
+          Boolean(currentUser.apartment_number) &&
+          params.metadata.target_apartments
+            .map((a: any) => String(a).trim())
+            .includes(String(currentUser.apartment_number).trim())) ||
+        (!params.recipientId &&
+          !params.metadata?.apartment_number &&
+          params.recipientRole === currentRole);
+
+      if (isCurrentUserRecipient) {
+        setActiveBannerNotification(newNotif);
+      }
+
+      await dispatchPushNotification({
+        toTokens: params.recipientPushToken ? [params.recipientPushToken] : [],
+        title: params.title,
+        body: params.body,
+        data: {
+          notificationId: newNotif.id,
+          recipientId: params.recipientId,
+          recipientRole: params.recipientRole,
+          targetRole: params.recipientRole,
+          category: params.category,
+          badgeLabel: params.badgeLabel,
+          isUrgent: params.isUrgent,
+          ...params.metadata,
+        },
+        triggerLocalBanner: isCurrentUserRecipient,
+      });
+    },
+    [currentRole, currentUser.id, currentUser.apartment_number, currentUser.building_id]
+  );
+
+  const dismissBannerNotification = useCallback(() => {
+    setActiveBannerNotification(null);
+  }, []);
+
+  const currentBuilding = useMemo(() => {
+    return (
+      buildings.find((b) => b.id === currentUser.building_id) ||
+      buildings[0] ||
+      DEFAULT_EMPTY_BUILDING
+    );
+  }, [buildings, currentUser.building_id]);
+
+  const currentRoleNotifications = useMemo(() => {
+    return notifications.filter((n) => {
+      if (n.building_id && n.building_id !== currentBuilding.id) return false;
+
+      if (currentRole === 'super_admin') {
+        return n.recipient_role === 'super_admin';
+      }
+
+      if (currentRole === 'admin') {
+        return (
+          n.recipient_role === 'admin' || n.recipient_id === currentUser.id
+        );
+      }
+
+      if (currentRole === 'resident') {
+        const effectiveResidentApt = currentUser.apartment_number || '302';
+
+        // Direct recipient by user ID
+        if (
+          n.recipient_id &&
+          (n.recipient_id === currentUser.id || n.recipient_id === 'usr-res-001')
+        ) {
+          return true;
+        }
+
+        // Targeted by apartment number
+        if (
+          n.metadata?.apartment_number &&
+          String(n.metadata.apartment_number).trim() ===
+            String(effectiveResidentApt).trim()
+        ) {
+          return true;
+        }
+
+        // Targeted via bulk reminder list
+        if (
+          Array.isArray(n.metadata?.target_apartments) &&
+          n.metadata.target_apartments
+            .map((a: any) => String(a).trim())
+            .includes(String(effectiveResidentApt).trim())
+        ) {
+          return true;
+        }
+
+        // Role-level match for residents (general or maintenance alerts or announcements, excluding join requests)
+        if (
+          n.recipient_role === 'resident' &&
+          n.category !== 'join_request'
+        ) {
+          return true;
+        }
+
+        return false;
+      }
+
+      return false;
+    });
+  }, [
+    notifications,
+    currentRole,
+    currentUser.id,
+    currentUser.apartment_number,
+    currentBuilding.id,
+  ]);
+
+  const unreadNotificationsCount = useMemo(() => {
+    return currentRoleNotifications.filter((n) => !n.is_read).length;
+  }, [currentRoleNotifications]);
+
+  const markAllNotificationsAsRead = useCallback(async () => {
+    if (isSupabaseConfigured) {
+      try {
+        await secureRpc.markAllNotificationsRead();
+      } catch {
+        // Ignore if offline
+      }
+    }
+    const visibleIds = new Set(currentRoleNotifications.map((n) => n.id));
+    setNotifications((prev) =>
+      prev.map((n) => (visibleIds.has(n.id) ? { ...n, is_read: true } : n))
+    );
+  }, [currentRoleNotifications]);
+
+  const markNotificationAsRead = useCallback((notificationId: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
+    );
+  }, []);
+
+  const isCurrentBuildingWritable = useMemo(() => {
+    if (!currentBuilding.id) return true;
+    if (
+      currentBuilding.subscription_status === 'expired' ||
+      currentBuilding.subscription_status === 'read_only'
+    ) {
+      return false;
+    }
+    const endDate =
+      currentBuilding.subscription_status === 'trial'
+        ? new Date(currentBuilding.trial_ends_at)
+        : new Date(currentBuilding.subscription_ends_at);
+    return endDate.getTime() >= Date.now();
+  }, [currentBuilding]);
+
+  const switchRole = useCallback(
+    (role: UserRole) => {
+      setCurrentRole(role);
+      setNotifications((prev) => {
+        const unreadForRole = prev.find((n) => {
+          if (n.is_read) return false;
+          if (role === 'resident') {
+            const isTargetResident =
+              n.recipient_role === 'resident' ||
+              n.recipient_id === usersByRole.resident.id ||
+              (Boolean(n.metadata?.apartment_number) &&
+                Boolean(usersByRole.resident.apartment_number) &&
+                String(n.metadata?.apartment_number).trim() ===
+                  String(usersByRole.resident.apartment_number).trim());
+            return isTargetResident && n.category !== 'join_request';
+          }
+          if (role === 'admin') {
+            return (
+              n.recipient_role === 'admin' ||
+              n.recipient_id === usersByRole.admin.id ||
+              n.category === 'join_request'
+            );
+          }
+          return false;
+        });
+        if (unreadForRole) {
+          setActiveBannerNotification(unreadForRole);
+        } else {
+          setActiveBannerNotification(null);
+        }
+        return prev;
+      });
+    },
+    [usersByRole.admin.id, usersByRole.resident.apartment_number, usersByRole.resident.id]
+  );
+
+  // 1. Admin creates building (60-day Pro trial + unique building_code)
+  const createBuildingForAdmin = useCallback(
+    async (input: {
+      fullName: string;
+      phone: string;
+      buildingName: string;
+      address: string;
+      totalApartments: number;
+      defaultMonthlyDues: number;
+      adminApartmentNumber: string;
+    }) => {
+      let rpcBuildingCode: string | null = null;
+      let rpcBuildingId: string | null = null;
+      if (isSupabaseConfigured) {
+        const { data, error } = await secureRpc.createBuildingForAdmin(input);
+        if (error) {
+          throw new Error(
+            error.message.includes('auth.uid() is null')
+              ? 'تعذر التحقق من المستخدم في Supabase. يرجى إيقاف خيار (Confirm email) في لوحة تحكم Supabase لتفعيل الحساب فوراً.'
+              : error.message
+          );
+        }
+        if (data?.building_code) {
+          rpcBuildingCode = String(data.building_code);
+        }
+        if (data?.building_id) {
+          rpcBuildingId = String(data.building_id);
+        }
+      }
+
+      const generatedCode =
+        rpcBuildingCode ||
+        'BLD-' + Math.floor(1000 + Math.random() * 9000).toString();
+      const trialEnd = new Date(Date.now() + 60 * 86400000).toISOString();
+      const newBuildingId = rpcBuildingId || 'bld-' + Date.now();
+
+      const newBuilding: Building = {
+        id: newBuildingId,
+        name: input.buildingName.trim(),
+        address: input.address.trim(),
+        city: 'القاهرة',
+        building_code: generatedCode,
+        admin_id: usersByRole.admin.id,
+        fund_balance: 0,
+        default_monthly_dues: input.defaultMonthlyDues,
+        total_apartments: input.totalApartments,
+        plan_code: 'pro',
+        subscription_status: 'trial',
+        trial_ends_at: trialEnd,
+        subscription_ends_at: trialEnd,
+        custom_monthly_price: null,
+        max_apartments_override: null,
+        features_config: {
+          receipt_upload: true,
+          emergency_claims: true,
+          export_reports: true,
+          voting: true,
+          maintenance_tickets: true,
+          documents_archive: true,
+        },
+        created_at: new Date().toISOString(),
+      };
+
+      setBuildings((prev) => [newBuilding, ...prev]);
+
+      const adminApt: Apartment = {
+        id: 'apt-' + Date.now(),
+        building_id: newBuildingId,
+        apartment_number: input.adminApartmentNumber.trim(),
+        floor_number: 'الدور الأول',
+        wing_or_direction: 'واجهة',
+        area_sqm: 160,
+        ownership_share_percent: Number(
+          (100 / Math.max(input.totalApartments, 1)).toFixed(2)
+        ),
+        monthly_dues_override: null,
+        resident_name: input.fullName.trim(),
+        resident_phone: input.phone.trim(),
+        occupant_name: input.fullName.trim(),
+        occupant_phone: input.phone.trim(),
+        resident_id: usersByRole.admin.id,
+        invite_code: `${generatedCode}-${input.adminApartmentNumber.trim()}`,
+        payment_status: 'paid',
+        arrears_amount: 0,
+        unpaid_amount: 0,
+        unpaid_months_count: 0,
+        is_active: true,
+      };
+      setApartments((prev) => [adminApt, ...prev.filter((a) => a.building_id === newBuildingId)]);
+
+      setUsersByRole((prev) => ({
+        ...prev,
+        admin: {
+          ...prev.admin,
+          full_name: input.fullName,
+          phone: input.phone,
+          building_id: newBuildingId,
+          apartment_number: input.adminApartmentNumber,
+          status: 'active',
+        },
+      }));
+      setCurrentRole('admin');
+      setAuthenticated(true);
+      loadDataFromSupabase();
+
+      return { buildingCode: generatedCode };
+    },
+    [usersByRole.admin.id, loadDataFromSupabase]
+  );
+
+  // 2. Scenario 1A: Resident requests to join building ➔ Immediate Push Notification to Admin!
+  const requestJoinBuilding = useCallback(
+    async (input: {
+      fullName: string;
+      phone: string;
+      buildingCode: string;
+      apartmentNumber: string;
+      floorNumber?: string;
+    }) => {
+      let cleanCode = input.buildingCode.trim().toUpperCase();
+      let targetAptNumber = input.apartmentNumber.trim();
+      const parts = cleanCode.split('-');
+      if (parts.length >= 3 && parts[0] === 'BLD') {
+        cleanCode = `${parts[0]}-${parts[1]}`;
+        if (!targetAptNumber) {
+          targetAptNumber = parts.slice(2).join('-');
+        }
+      }
+
+      let targetBuilding = buildings.find(
+        (b) => b.building_code.trim().toUpperCase() === cleanCode
+      );
+
+      // If not yet present in local memory, check Supabase directly
+      if (!targetBuilding && isSupabaseConfigured) {
+        try {
+          const { data } = await supabase
+            .from('buildings')
+            .select('*')
+            .ilike('building_code', cleanCode)
+            .maybeSingle();
+          if (data) {
+            targetBuilding = data as Building;
+            setBuildings((prev) => [data as Building, ...prev]);
+          } else {
+            const { data: rpcData } = await supabase.rpc(
+              'lookup_building_apartments_for_join',
+              { p_building_code: cleanCode }
+            );
+            if (rpcData && rpcData.building_id) {
+              const fallbackBld: Building = {
+                id: rpcData.building_id,
+                name: rpcData.building_name || 'عمارة سكنية',
+                address: rpcData.building_name || 'القاهرة',
+                city: 'القاهرة',
+                building_code: rpcData.building_code || cleanCode,
+                admin_id: '',
+                fund_balance: 0,
+                default_monthly_dues: 350,
+                total_apartments: rpcData.apartments?.length || 16,
+                plan_code: 'pro',
+                subscription_status: 'trial',
+                trial_ends_at: new Date(Date.now() + 60 * 86400000).toISOString(),
+                subscription_ends_at: new Date(
+                  Date.now() + 60 * 86400000
+                ).toISOString(),
+                custom_monthly_price: null,
+                max_apartments_override: null,
+                features_config: {
+                  receipt_upload: true,
+                  emergency_claims: true,
+                  export_reports: true,
+                  voting: true,
+                  maintenance_tickets: true,
+                  documents_archive: true,
+                },
+                created_at: new Date().toISOString(),
+              };
+              targetBuilding = fallbackBld;
+              setBuildings((prev) => [fallbackBld, ...prev]);
+            }
+          }
+        } catch {}
+      }
+
+      if (!targetBuilding) {
+        throw new Error(
+          `كود المبنى (${input.buildingCode}) غير صحيح أو غير مسجل في قاعدة البيانات. يرجى الحصول على الكود الصحيح من رئيس الاتحاد.`
+        );
+      }
+
+      if (isSupabaseConfigured) {
+        const { error } = await secureRpc.requestJoinBuilding({
+          ...input,
+          buildingCode: cleanCode,
+          apartmentNumber: targetAptNumber,
+        });
+        if (error) {
+          throw new Error(
+            error.message.includes('auth.uid() is null')
+              ? 'تعذر التحقق من المستخدم في Supabase. يرجى إيقاف خيار (Confirm email) في لوحة تحكم Supabase لتفعيل الحساب فوراً.'
+              : error.message
+          );
+        }
+      }
+
+      const pendingUser: UserProfile = {
+        id: 'usr-res-' + Date.now(),
+        full_name: input.fullName.trim(),
+        email: 'resident@ittihad.app',
+        phone: input.phone.trim(),
+        role: 'resident',
+        status: 'pending',
+        building_id: targetBuilding.id,
+        apartment_id: 'apt-' + targetAptNumber,
+        apartment_number: targetAptNumber,
+        floor_number: input.floorNumber || 'الدور الأول',
+        residency_type: 'owner_resident',
+        ownership_share_percent: Number(
+          (100 / Math.max(targetBuilding.total_apartments, 1)).toFixed(2)
+        ),
+        push_token: expoPushToken,
+        push_token_updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
+
+      setReviewedResidentKeys((prev) => {
+        const next = { ...prev };
+        delete next[input.phone.trim()];
+        delete next[`${targetBuilding.id}_${targetAptNumber}`];
+        delete next[targetAptNumber];
+        AsyncStorage.setItem('@ittihad_reviewed_residents', JSON.stringify(next)).catch(() => {});
+        return next;
+      });
+
+      setPendingResidents((prev) => {
+        const filtered = prev.filter(
+          (p) =>
+            p.phone !== input.phone.trim() ||
+            p.apartment_number !== targetAptNumber
+        );
+        return [pendingUser, ...filtered];
+      });
+      setUsersByRole((prev) => ({
+        ...prev,
+        resident: pendingUser,
+      }));
+      setCurrentRole('resident');
+      setAuthenticated(true);
+
+      // Scenario 1A: Send immediate notification to Building Admin
+      await pushAndRecordNotification({
+        recipientId: usersByRole.admin.id,
+        recipientRole: 'admin',
+        recipientPushToken: usersByRole.admin.push_token,
+        buildingId: targetBuilding.id,
+        title: `طلب انضمام ساكن جديد (شقة ${input.apartmentNumber.trim()}) 🔔`,
+        body: `قام الساكن (${input.fullName.trim()}) بطلب الانضمام لشقة رقم (${input.apartmentNumber.trim()}) في ${targetBuilding.name} وهو بانتظار موافقتك.`,
+        category: 'join_request',
+        badgeLabel: 'طلب انضمام معلق',
+        isUrgent: true,
+        metadata: {
+          apartment_number: input.apartmentNumber.trim(),
+          resident_id: pendingUser.id,
+        },
+      });
+    },
+    [buildings, currentBuilding, expoPushToken, pushAndRecordNotification, usersByRole.admin]
+  );
+
+  // 3. Scenario 2B & Mechanism 2: Admin approves or rejects pending resident join request (with optional apartment override in 1 step)
+  const reviewResidentJoinRequest = useCallback(
+    async (
+      residentId: string,
+      approve: boolean,
+      overrideApartmentNumber?: string
+    ) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error(
+          'انتهى اشتراك العمارة (وضع القراءة فقط Read-Only). يرجى تجديد الاشتراك أولاً.'
+        );
+      }
+
+      if (processingIds[residentId]) return;
+      setProcessingIds((prev) => ({ ...prev, [residentId]: true }));
+
+      try {
+        const target = pendingResidents.find((r) => r.id === residentId);
+        if (!target || target.status !== 'pending') {
+          throw new Error('تمت معالجة طلب هذا الساكن مسبقاً.');
+        }
+
+        const finalAptNumber = (
+          overrideApartmentNumber?.trim() ||
+          target.apartment_number ||
+          ''
+        ).trim();
+
+        const targetAptObj = apartments.find(
+          (a) =>
+            a.building_id === (target.building_id || currentBuilding.id) &&
+            a.apartment_number === finalAptNumber
+        );
+
+        if (isSupabaseConfigured) {
+          try {
+            await secureRpc.reviewResidentJoinRequest(
+              residentId,
+              approve,
+              targetAptObj?.id ?? null,
+              finalAptNumber || null,
+              usersByRole.admin.id
+            );
+          } catch (rpcErr) {
+            console.warn('reviewResidentJoinRequest error:', rpcErr);
+          }
+        }
+
+        const newStatus = approve ? 'active' : 'rejected';
+
+        // 1. Permanently register in reviewedResidentKeys and save to AsyncStorage
+        const reviewRecord: ReviewedResidentEntry = {
+          status: newStatus,
+          phone: target.phone,
+          apartmentNumber: finalAptNumber,
+          fullName: target.full_name,
+          buildingId: target.building_id || currentBuilding.id,
+          reviewedAt: new Date().toISOString(),
+        };
+
+        setReviewedResidentKeys((prev) => {
+          const updated: Record<string, ReviewedResidentEntry> = {
+            ...prev,
+            [residentId]: reviewRecord,
+            ...(target.phone ? { [target.phone.trim()]: reviewRecord } : {}),
+            ...(finalAptNumber
+              ? {
+                  [`${target.building_id || currentBuilding.id}_${finalAptNumber}`]:
+                    reviewRecord,
+                  [finalAptNumber]: reviewRecord,
+                }
+              : {}),
+          };
+          AsyncStorage.setItem(
+            '@ittihad_reviewed_residents',
+            JSON.stringify(updated)
+          ).catch(() => {});
+          return updated;
+        });
+
+        // 2. Remove from pendingResidents
+        setPendingResidents((prev) =>
+          prev.filter(
+            (r) =>
+              r.id !== residentId &&
+              (target.phone ? r.phone?.trim() !== target.phone.trim() : true) &&
+              (finalAptNumber
+                ? String(r.apartment_number).trim() !== finalAptNumber
+                : true)
+          )
+        );
+
+        // 3. Immediately update usersByRole.resident
+        setUsersByRole((prev) => ({
+          ...prev,
+          resident: {
+            ...prev.resident,
+            id: residentId,
+            status: newStatus,
+            full_name: target.full_name || prev.resident.full_name,
+            phone: target.phone || prev.resident.phone,
+            apartment_number:
+              finalAptNumber || prev.resident.apartment_number,
+            apartment_id: targetAptObj?.id || prev.resident.apartment_id,
+            building_id:
+              target.building_id || prev.resident.building_id || currentBuilding.id,
+          },
+        }));
+
+        if (approve && finalAptNumber) {
+          setApartments((prev) => {
+            const exists = prev.some(
+              (a) =>
+                a.building_id === target.building_id &&
+                a.apartment_number === finalAptNumber
+            );
+            if (exists) {
+              return prev.map((a) =>
+                a.building_id === target.building_id &&
+                a.apartment_number === finalAptNumber
+                  ? {
+                      ...a,
+                      resident_id: target.id,
+                      resident_name: target.full_name,
+                      resident_phone: target.phone,
+                      occupant_name: a.occupant_name || target.full_name,
+                      occupant_phone: a.occupant_phone || target.phone,
+                    }
+                  : a
+              );
+            }
+            return [
+              ...prev,
+              {
+                id: 'apt-' + finalAptNumber,
+                building_id: target.building_id || currentBuilding.id,
+                apartment_number: finalAptNumber,
+                floor_number: target.floor_number || 'الدور الرابع',
+                wing_or_direction: 'واجهة',
+                area_sqm: 160,
+                ownership_share_percent: target.ownership_share_percent,
+                occupant_name: target.full_name,
+                occupant_phone: target.phone,
+                arrears_amount: currentBuilding.default_monthly_dues,
+                resident_id: target.id,
+                resident_name: target.full_name,
+                resident_phone: target.phone,
+                payment_status: 'unpaid',
+                unpaid_months_count: 1,
+                unpaid_amount: currentBuilding.default_monthly_dues,
+                is_active: true,
+              },
+            ];
+          });
+        }
+
+        const wasReassigned =
+          Boolean(overrideApartmentNumber) &&
+          overrideApartmentNumber?.trim() !== target.apartment_number;
+
+        // Scenario 2B: Notify Resident of Join Request Approval or Rejection
+        await pushAndRecordNotification({
+          recipientId: target.id,
+          recipientRole: 'resident',
+          recipientPushToken:
+            target.push_token || usersByRole.resident.push_token,
+          buildingId: target.building_id || currentBuilding.id,
+          title: approve
+            ? `تم قبول انضمامك وتفعيل حسابك بنجاح (شقة ${finalAptNumber}) 🎉`
+            : `تعذر قبول طلب الانضمام لشقة ${target.apartment_number}`,
+          body: approve
+            ? wasReassigned
+              ? `مرحباً ${target.full_name}، قام رئيس الاتحاد بتعديل رقم وحدتك إلى شقة (${finalAptNumber}) بدلاً من (${target.apartment_number}) واعتماد انضمامك رسمياً.`
+              : `مرحباً ${target.full_name}، وافق رئيس اتحاد الملاك على انضمامك لشقة (${finalAptNumber}). يمكنك الآن الدخول لكافة شاشات التطبيق ومتابعة الخزينة.`
+            : `نعتذر ${target.full_name}، لم تتم الموافقة على طلب انضمامك لشقة (${target.apartment_number}). يرجى مراجعة رئيس اتحاد الملاك.`,
+          category: 'join_request',
+          badgeLabel: approve ? 'حساب مفعل' : 'مرفوض',
+          isUrgent: !approve,
+          metadata: {
+            apartment_number: finalAptNumber || undefined,
+            resident_id: target.id,
+          },
+        });
+      } finally {
+        setProcessingIds((prev) => ({ ...prev, [residentId]: false }));
+      }
+    },
+    [
+      apartments,
+      currentBuilding.default_monthly_dues,
+      currentBuilding.id,
+      isCurrentBuildingWritable,
+      pendingResidents,
+      processingIds,
+      pushAndRecordNotification,
+      usersByRole.resident.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  // Mechanism 3: Transfer unpaid obligations (and optionally occupant_name/phone) between apartments in 1 click
+  const transferApartmentObligations = useCallback(
+    async (input: {
+      sourceApartmentId: string;
+      targetApartmentId: string;
+      obligationIds?: string[];
+      transferOccupantInfo?: boolean;
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error(
+          'انتهى اشتراك العمارة (وضع القراءة فقط Read-Only). يرجى تجديد الاشتراك أولاً.'
+        );
+      }
+
+      if (input.sourceApartmentId === input.targetApartmentId) {
+        throw new Error('لا يمكن نقل الالتزامات إلى نفس الشقة.');
+      }
+
+      const sourceApt = apartments.find(
+        (a) => a.id === input.sourceApartmentId
+      );
+      const targetApt = apartments.find(
+        (a) => a.id === input.targetApartmentId
+      );
+
+      if (!sourceApt || !targetApt) {
+        throw new Error('إحدى الشقتين غير موجودة في سجلات المبنى.');
+      }
+
+      if (isSupabaseConfigured) {
+        try {
+          await secureRpc.transferApartmentObligations({
+            sourceApartmentId: input.sourceApartmentId,
+            targetApartmentId: input.targetApartmentId,
+            obligationIds: input.obligationIds ?? null,
+            transferOccupantInfo: input.transferOccupantInfo ?? false,
+          });
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      // Filter unpaid obligations on source apartment to move
+      const candidateObligations = apartmentObligations.filter(
+        (obl) =>
+          obl.apartment_id === input.sourceApartmentId &&
+          obl.status === 'unpaid' &&
+          (!input.obligationIds ||
+            input.obligationIds.length === 0 ||
+            input.obligationIds.includes(obl.id))
+      );
+
+      if (candidateObligations.length === 0) {
+        throw new Error(
+          'لا توجد التزامات غير مسددة (unpaid) مطابقة لنقلها من هذه الشقة.'
+        );
+      }
+
+      const movedIds = new Set(candidateObligations.map((o) => o.id));
+      const transferredAmount = candidateObligations.reduce(
+        (sum, o) => sum + o.amount,
+        0
+      );
+      const nowIso = new Date().toISOString();
+
+      const nextObligations = apartmentObligations.map((obl) =>
+        movedIds.has(obl.id)
+          ? {
+              ...obl,
+              apartment_id: targetApt.id,
+              apartment_number: targetApt.apartment_number,
+              transferred_from_apartment_id: sourceApt.id,
+              transferred_from_apartment_number: sourceApt.apartment_number,
+              transferred_at: nowIso,
+            }
+          : obl
+      );
+
+      setApartmentObligations(nextObligations);
+
+      // Recalculate arrears & unpaid_months_count for both source and target apartments
+      const sourceRemainingUnpaid = nextObligations.filter(
+        (o) => o.apartment_id === sourceApt.id && o.status === 'unpaid'
+      );
+      const targetNextUnpaid = nextObligations.filter(
+        (o) => o.apartment_id === targetApt.id && o.status === 'unpaid'
+      );
+
+      const sourceNextAmount = sourceRemainingUnpaid.reduce(
+        (sum, o) => sum + o.amount,
+        0
+      );
+      const targetNextAmount = targetNextUnpaid.reduce(
+        (sum, o) => sum + o.amount,
+        0
+      );
+
+      setApartments((prev) =>
+        prev.map((apt) => {
+          if (apt.id === sourceApt.id) {
+            return {
+              ...apt,
+              unpaid_amount: sourceNextAmount,
+              arrears_amount: sourceNextAmount,
+              unpaid_months_count: sourceRemainingUnpaid.length,
+              payment_status:
+                sourceNextAmount === 0 && apt.payment_status === 'unpaid'
+                  ? 'paid'
+                  : apt.payment_status,
+              occupant_name: input.transferOccupantInfo
+                ? null
+                : apt.occupant_name,
+              occupant_phone: input.transferOccupantInfo
+                ? null
+                : apt.occupant_phone,
+              resident_name:
+                input.transferOccupantInfo && !apt.resident_id
+                  ? 'وحدة شاغرة (تم نقل البيانات)'
+                  : apt.resident_name,
+            };
+          }
+          if (apt.id === targetApt.id) {
+            const transferredName =
+              input.transferOccupantInfo && sourceApt.occupant_name
+                ? sourceApt.occupant_name
+                : apt.occupant_name;
+            const transferredPhone =
+              input.transferOccupantInfo && sourceApt.occupant_phone
+                ? sourceApt.occupant_phone
+                : apt.occupant_phone;
+
+            return {
+              ...apt,
+              unpaid_amount: targetNextAmount,
+              arrears_amount: targetNextAmount,
+              unpaid_months_count: targetNextUnpaid.length,
+              payment_status:
+                targetNextAmount > 0 ? 'unpaid' : apt.payment_status,
+              occupant_name: transferredName,
+              occupant_phone: transferredPhone,
+              resident_name:
+                !apt.resident_id && transferredName
+                  ? `${transferredName} (مسجل مبدئياً)`
+                  : apt.resident_name,
+              resident_phone:
+                !apt.resident_id && transferredPhone
+                  ? transferredPhone
+                  : apt.resident_phone,
+            };
+          }
+          return apt;
+        })
+      );
+
+      return {
+        transferredCount: candidateObligations.length,
+        transferredAmount,
+        sourceApartmentNumber: sourceApt.apartment_number,
+        targetApartmentNumber: targetApt.apartment_number,
+      };
+    },
+    [apartmentObligations, apartments, isCurrentBuildingWritable]
+  );
+
+  // Add a pre-registered obligation / arrears entry to a specific apartment
+  const addApartmentObligation = useCallback(
+    async (input: {
+      apartmentId: string;
+      title: string;
+      amount: number;
+      billingMonth: string;
+      category?: PaymentCategoryType;
+      notes?: string;
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+
+      const targetApt = apartments.find((a) => a.id === input.apartmentId);
+      if (!targetApt) {
+        throw new Error('الشقة المحددة غير موجودة.');
+      }
+
+      const newObligation: ApartmentObligation = {
+        id: 'obl-' + Date.now(),
+        building_id: currentBuilding.id,
+        apartment_id: targetApt.id,
+        apartment_number: targetApt.apartment_number,
+        title: input.title.trim(),
+        category: input.category || 'monthly_dues',
+        billing_month: input.billingMonth.trim(),
+        amount: input.amount,
+        status: 'unpaid',
+        notes: input.notes?.trim() || null,
+        created_at: new Date().toISOString(),
+      };
+
+      setApartmentObligations((prev) => [newObligation, ...prev]);
+      setApartments((prev) =>
+        prev.map((apt) =>
+          apt.id === targetApt.id
+            ? {
+                ...apt,
+                payment_status: 'unpaid',
+                unpaid_months_count: (apt.unpaid_months_count || 0) + 1,
+                unpaid_amount: (apt.unpaid_amount || 0) + input.amount,
+                arrears_amount: (apt.arrears_amount || 0) + input.amount,
+              }
+            : apt
+        )
+      );
+    },
+    [apartments, currentBuilding.id, isCurrentBuildingWritable]
+  );
+
+  // 4. Scenario 1B: Resident submits payment (monthly dues or emergency claim) ➔ Immediate Push Notification to Admin!
+  const submitResidentPayment = useCallback(
+    async (input: {
+      amount: number;
+      paymentMethod: PaymentMethodType;
+      billingMonth: string;
+      cashRecipient?: CashRecipientType;
+      receiptImageUrl?: string;
+      paymentCategory?: PaymentCategoryType;
+      emergencyClaimId?: string;
+      referenceNumber?: string;
+      notes?: string;
+    }) => {
+      if (
+        input.paymentMethod === 'electronic_transfer' &&
+        !currentBuilding.features_config.receipt_upload
+      ) {
+        throw new Error(
+          'ميزة رفع إيصالات التحويل الإلكتروني غير مفعلة في باقة العمارة الحالية.'
+        );
+      }
+
+      const resident = usersByRole.resident;
+      const effectiveResidentApt = resident.apartment_number || '302';
+      let serverPaymentId: string | null = null;
+      if (isSupabaseConfigured) {
+        try {
+          const rpcRes = await secureRpc.submitResidentPayment({
+            ...input,
+            buildingId: currentBuilding.id,
+            apartmentId: resident.apartment_id || undefined,
+            apartmentNumber: effectiveResidentApt,
+            residentId: resident.id,
+            residentName: resident.full_name || 'الساكن / المالك',
+          });
+          if (rpcRes?.data?.payment_id) {
+            serverPaymentId = String(rpcRes.data.payment_id);
+          }
+        } catch (rpcErr) {
+          console.warn('submitResidentPayment RPC error:', rpcErr);
+        }
+      }
+
+      const category = input.paymentCategory || 'monthly_dues';
+
+      // Idempotency & Duplicate Check
+      const existingPayment = payments.find((p) => {
+        if (p.building_id !== currentBuilding.id) return false;
+        if (p.payment_category !== category) return false;
+        if (p.status !== 'pending' && p.status !== 'paid') return false;
+
+        const isSameApartment =
+          (p.apartment_number &&
+            effectiveResidentApt &&
+            String(p.apartment_number).trim() ===
+              String(effectiveResidentApt).trim()) ||
+          (p.apartment_id && p.apartment_id === resident.apartment_id) ||
+          p.resident_id === resident.id;
+
+        if (!isSameApartment) return false;
+
+        if (category === 'emergency_claim') {
+          return (
+            Boolean(input.emergencyClaimId) &&
+            p.emergency_claim_id === input.emergencyClaimId
+          );
+        } else {
+          return (
+            Boolean(input.billingMonth) &&
+            p.billing_month === input.billingMonth
+          );
+        }
+      });
+
+      if (existingPayment) {
+        if (existingPayment.status === 'paid') {
+          throw new Error(
+            'تم سداد هذا الاشتراك مسبقاً ومعتمد في سجلات الخزينة.'
+          );
+        } else {
+          throw new Error(
+            'لديك طلب سداد قيد المراجعة بالفعل لهذا الشهر/المطالبة. يرجى انتظار اعتماد رئيس الاتحاد.'
+          );
+        }
+      }
+
+      const assignedPaymentId = serverPaymentId || ('pay-' + Date.now());
+      const newPayment: Payment = {
+        id: assignedPaymentId,
+        building_id: currentBuilding.id,
+        apartment_id: resident.apartment_id,
+        apartment_number: effectiveResidentApt,
+        resident_id: resident.id,
+        resident_name: resident.full_name || 'الساكن / المالك',
+        payment_category: category,
+        emergency_claim_id: input.emergencyClaimId || null,
+        billing_month: input.billingMonth,
+        amount: input.amount,
+        payment_method: input.paymentMethod,
+        cash_recipient: input.cashRecipient || null,
+        receipt_image_url: input.receiptImageUrl || null,
+        reference_number:
+          input.referenceNumber ||
+          '#IP-' + Math.floor(10000 + Math.random() * 90000),
+        notes:
+          input.notes ||
+          (input.paymentMethod === 'cash'
+            ? `تسليم كاش لـ ${input.cashRecipient === 'admin' ? 'رئيس الاتحاد' : 'حارس العمارة'}`
+            : 'تحويل إلكتروني / إنستاباي مرفق بالإيصال'),
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      };
+
+      setPayments((prev) => [newPayment, ...prev]);
+
+      // Update apartment status to pending review
+      if (category === 'monthly_dues') {
+        setApartments((prev) =>
+          prev.map((apt) =>
+            apt.apartment_number === effectiveResidentApt
+              ? { ...apt, payment_status: 'pending' }
+              : apt
+          )
+        );
+      }
+
+      // Scenario 1B: Send immediate notification to Admin about new receipt / payment
+      const paymentTypeAr =
+        category === 'emergency_claim'
+          ? 'مساهمة مطالبة صيانة طارئة'
+          : `اشتراك شهر (${input.billingMonth})`;
+      const methodAr =
+        input.paymentMethod === 'electronic_transfer'
+          ? 'تحويل إلكتروني مرفق بصورة الإيصال'
+          : `سداد نقدي (كاش طرف ${input.cashRecipient === 'admin' ? 'رئيس الاتحاد' : 'حارس العمارة'})`;
+
+      await pushAndRecordNotification({
+        recipientId: usersByRole.admin.id,
+        recipientRole: 'admin',
+        recipientPushToken: usersByRole.admin.push_token,
+        buildingId: currentBuilding.id,
+        title: `إيصال سداد جديد — شقة ${effectiveResidentApt} 💳`,
+        body: `قام (${resident.full_name || 'الساكن'}) برفع طلب سداد ${paymentTypeAr} بقيمة ${input.amount.toLocaleString()} ج.م عبر (${methodAr}) بانتظار مراجعتك.`,
+        category: 'financial',
+        badgeLabel:
+          category === 'emergency_claim' ? 'سداد طوارئ جديد' : 'إيصال للمراجعة',
+        isUrgent: category === 'emergency_claim',
+        metadata: {
+          apartment_number: effectiveResidentApt,
+          amount: input.amount,
+          payment_id: newPayment.id,
+          category,
+        },
+      });
+    },
+    [
+      currentBuilding,
+      payments,
+      pushAndRecordNotification,
+      usersByRole.admin,
+      usersByRole.resident,
+    ]
+  );
+
+  // 5. Scenario 2A (Approve): Admin approves resident payment ➔ Immediate Push Notification to Resident!
+  const approveResidentPayment = useCallback(
+    async (paymentId: string) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error(
+          'انتهى اشتراك العمارة (وضع القراءة فقط Read-Only). لا يمكن اعتماد معاملات مالية قبل تجديد الاشتراك.'
+        );
+      }
+
+      if (processingIds[paymentId]) {
+        throw new Error('جاري معالجة هذا الطلب بالفعل...');
+      }
+
+      const targetPayment = payments.find((p) => p.id === paymentId);
+      if (!targetPayment) {
+        throw new Error('طلب السداد غير موجود.');
+      }
+
+      if (targetPayment.status !== 'pending') {
+        throw new Error(
+          `منع التكرار المزدوج (Idempotency): تمت معالجة هذا الطلب مسبقاً وحالته (${targetPayment.status}).`
+        );
+      }
+
+      setProcessingIds((prev) => ({ ...prev, [paymentId]: true }));
+
+      try {
+        const isValidUuid =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            paymentId
+          );
+
+        if (isSupabaseConfigured && isValidUuid) {
+          try {
+            await secureRpc.approveResidentPayment(paymentId, usersByRole.admin.id);
+          } catch (rpcErr) {
+            console.warn('approveResidentPayment RPC warning:', rpcErr);
+          }
+        }
+
+        const effectiveAptNum =
+          targetPayment.apartment_number ||
+          apartments.find((a) => a.id === targetPayment.apartment_id)?.apartment_number ||
+          '302';
+
+        // 1. Update payment status to 'paid' and clean up matching in-flight duplicates
+        setPayments((prev) =>
+          prev.map((p) => {
+            if (p.id === paymentId) {
+              return {
+                ...p,
+                apartment_number: effectiveAptNum || p.apartment_number,
+                status: 'paid',
+                reviewed_by: usersByRole.admin.id,
+                reviewed_at: new Date().toISOString(),
+              };
+            }
+            const isSameApt =
+              (p.apartment_number && effectiveAptNum && String(p.apartment_number).trim() === String(effectiveAptNum).trim()) ||
+              (p.resident_id && targetPayment.resident_id && p.resident_id === targetPayment.resident_id);
+            if (isSameApt && p.payment_category === targetPayment.payment_category) {
+              if (
+                targetPayment.payment_category === 'emergency_claim' &&
+                p.emergency_claim_id === targetPayment.emergency_claim_id
+              ) {
+                return { ...p, status: 'paid' };
+              }
+              if (p.billing_month === targetPayment.billing_month) {
+                return { ...p, status: 'paid' };
+              }
+            }
+            return p;
+          })
+        );
+
+        // 2. Increase building fund_balance atomically
+        setBuildings((prev) =>
+          prev.map((b) =>
+            b.id === targetPayment.building_id
+              ? { ...b, fund_balance: b.fund_balance + targetPayment.amount }
+              : b
+          )
+        );
+
+        // 3. Update apartment status or emergency claim progress bar
+        if (
+          targetPayment.payment_category === 'emergency_claim' &&
+          targetPayment.emergency_claim_id
+        ) {
+          setEmergencyClaims((prev) =>
+            prev.map((clm) => {
+              if (clm.id !== targetPayment.emergency_claim_id) return clm;
+              const nextCollected = clm.collected_amount + targetPayment.amount;
+              return {
+                ...clm,
+                collected_amount: nextCollected,
+                contributors_count: (clm.contributors_count || 0) + 1,
+                status:
+                  nextCollected >= clm.target_amount ? 'completed' : clm.status,
+              };
+            })
+          );
+        } else {
+          setApartments((prev) =>
+            prev.map((apt) =>
+              (apt.apartment_number === effectiveAptNum || apt.id === targetPayment.apartment_id) &&
+              apt.building_id === targetPayment.building_id
+                ? {
+                    ...apt,
+                    payment_status: 'paid',
+                    unpaid_months_count: 0,
+                    unpaid_amount: 0,
+                  }
+                : apt
+            )
+          );
+        }
+
+        // Scenario 2A: Send immediate notification to Resident on approval
+        const paymentDesc =
+          targetPayment.payment_category === 'emergency_claim'
+            ? 'مساهمة الصيانة الطارئة'
+            : `اشتراك شهر (${targetPayment.billing_month})`;
+
+        await pushAndRecordNotification({
+          recipientId: targetPayment.resident_id || usersByRole.resident.id,
+          recipientRole: 'resident',
+          recipientPushToken: usersByRole.resident.push_token,
+          buildingId: targetPayment.building_id,
+          title: `تم اعتماد سدادك بنجاح (شقة ${effectiveAptNum || 'المبنى'}) ✅`,
+          body: `اعتمد رئيس الاتحاد دفعتك بقيمة ${targetPayment.amount.toLocaleString()} ج.م عن ${paymentDesc} وتمت إضافتها رسمياً لرصيد خزينة العمارة.`,
+          category: 'financial',
+          badgeLabel: 'اشتراك معتمد',
+          isUrgent: false,
+          metadata: {
+            apartment_number: effectiveAptNum || undefined,
+            amount: targetPayment.amount,
+            payment_id: targetPayment.id,
+            category: targetPayment.payment_category,
+          },
+        });
+
+        // Trigger fresh sync from Supabase to keep state completely unified
+        loadDataFromSupabase().catch(() => {});
+      } finally {
+        setProcessingIds((prev) => ({ ...prev, [paymentId]: false }));
+      }
+    },
+    [
+      apartments,
+      isCurrentBuildingWritable,
+      loadDataFromSupabase,
+      payments,
+      processingIds,
+      pushAndRecordNotification,
+      usersByRole.admin.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  // 6. Scenario 2A (Reject): Admin rejects resident payment (with rejection reason!) ➔ Immediate Push Notification to Resident!
+  const rejectResidentPayment = useCallback(
+    async (paymentId: string, reason?: string) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+      if (processingIds[paymentId]) return;
+
+      const targetPayment = payments.find((p) => p.id === paymentId);
+      if (!targetPayment || targetPayment.status !== 'pending') {
+        throw new Error(
+          'منع التكرار المزدوج: تمت معالجة طلب السداد هذا مسبقاً.'
+        );
+      }
+
+      const finalReason =
+        reason?.trim() || 'بيانات الإيصال غير واضحة أو لم يصل التحويل لحساب الاتحاد';
+
+      setProcessingIds((prev) => ({ ...prev, [paymentId]: true }));
+      try {
+        const isValidUuid =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            paymentId
+          );
+
+        if (isSupabaseConfigured && isValidUuid) {
+          try {
+            await secureRpc.rejectResidentPayment(paymentId, finalReason, usersByRole.admin.id);
+          } catch {
+            // Graceful fallback
+          }
+        }
+
+        const effectiveAptNum =
+          targetPayment.apartment_number ||
+          apartments.find((a) => a.id === targetPayment.apartment_id)?.apartment_number ||
+          '302';
+
+        const paymentDesc =
+          targetPayment.payment_category === 'emergency_claim'
+            ? 'مساهمة الصيانة الطارئة'
+            : `اشتراك شهر (${targetPayment.billing_month || 'الاشتراك الشهري'})`;
+
+        setPayments((prev) =>
+          prev.map((p) =>
+            p.id === paymentId
+              ? {
+                  ...p,
+                  apartment_number: effectiveAptNum,
+                  status: 'rejected',
+                  reviewed_by: usersByRole.admin.id,
+                  reviewed_at: new Date().toISOString(),
+                  rejection_reason: finalReason,
+                }
+              : p
+          )
+        );
+
+        setApartments((prev) =>
+          prev.map((apt) =>
+            (apt.apartment_number === effectiveAptNum || apt.id === targetPayment.apartment_id) &&
+            apt.building_id === targetPayment.building_id
+              ? { ...apt, payment_status: 'unpaid' }
+              : apt
+          )
+        );
+
+        // Scenario 2A (Reject): Send immediate notification to Resident with rejection reason
+        await pushAndRecordNotification({
+          recipientId: targetPayment.resident_id || usersByRole.resident.id,
+          recipientRole: 'resident',
+          recipientPushToken: usersByRole.resident.push_token,
+          buildingId: targetPayment.building_id,
+          title: `تعذر اعتماد إيصال السداد (شقة ${effectiveAptNum}) ⚠️`,
+          body: `تم رفض طلب السداد بقيمة ${targetPayment.amount.toLocaleString()} ج.م عن ${paymentDesc}. سبب الرفض: "${finalReason}". يرجى إعادة المحاولة أو مراجعة رئيس الاتحاد.`,
+          category: 'financial',
+          badgeLabel: 'إيصال مرفوض',
+          isUrgent: true,
+          metadata: {
+            apartment_number: effectiveAptNum,
+            amount: targetPayment.amount,
+            rejection_reason: finalReason,
+            payment_id: targetPayment.id,
+            category: targetPayment.payment_category,
+          },
+        });
+
+        loadDataFromSupabase().catch(() => {});
+      } finally {
+        setProcessingIds((prev) => ({ ...prev, [paymentId]: false }));
+      }
+    },
+    [
+      apartments,
+      isCurrentBuildingWritable,
+      loadDataFromSupabase,
+      payments,
+      processingIds,
+      pushAndRecordNotification,
+      usersByRole.admin.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  // 6B. Admin records direct cash payment for an apartment (emergency claim or monthly dues)
+  const recordDirectCashPayment = useCallback(
+    async (input: {
+      apartmentId: string;
+      apartmentNumber: string;
+      residentId?: string | null;
+      residentName?: string | null;
+      amount: number;
+      category: PaymentCategoryType;
+      emergencyClaimId?: string | null;
+      billingMonth: string;
+      notes?: string;
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+
+      const paymentId = 'pay-' + Date.now();
+      const newPayment: Payment = {
+        id: paymentId,
+        building_id: currentBuilding.id,
+        apartment_id: input.apartmentId,
+        apartment_number: input.apartmentNumber,
+        resident_id: input.residentId || null,
+        resident_name: input.residentName || `شقة ${input.apartmentNumber}`,
+        payment_category: input.category,
+        emergency_claim_id: input.emergencyClaimId || null,
+        billing_month: input.billingMonth,
+        amount: input.amount,
+        payment_method: 'cash',
+        cash_recipient: 'admin',
+        receipt_image_url: null,
+        reference_number: '#CASH-' + Math.floor(10000 + Math.random() * 90000),
+        notes: input.notes || 'سداد نقدي مباشر لرئيس الاتحاد',
+        status: 'paid',
+        reviewed_by: usersByRole.admin.id,
+        reviewed_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
+
+      if (isSupabaseConfigured) {
+        try {
+          await supabase.from('payments').insert({
+            building_id: currentBuilding.id,
+            apartment_id: input.apartmentId,
+            resident_id: input.residentId || null,
+            payment_category: input.category,
+            emergency_claim_id: input.emergencyClaimId || null,
+            billing_month: input.billingMonth,
+            amount: input.amount,
+            payment_method: 'cash',
+            cash_recipient: 'admin',
+            notes: input.notes || 'سداد نقدي مباشر لرئيس الاتحاد',
+            status: 'paid',
+            reviewed_by: usersByRole.admin.id,
+            reviewed_at: new Date().toISOString(),
+          });
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      setPayments((prev) => [newPayment, ...prev]);
+
+      // Increase fund balance
+      setBuildings((prev) =>
+        prev.map((b) =>
+          b.id === currentBuilding.id
+            ? { ...b, fund_balance: b.fund_balance + input.amount }
+            : b
+        )
+      );
+
+      // If emergency claim, update collected_amount and contributors_count
+      if (input.category === 'emergency_claim' && input.emergencyClaimId) {
+        setEmergencyClaims((prev) =>
+          prev.map((clm) => {
+            if (clm.id !== input.emergencyClaimId) return clm;
+            const nextCollected = clm.collected_amount + input.amount;
+            return {
+              ...clm,
+              collected_amount: nextCollected,
+              contributors_count: (clm.contributors_count || 0) + 1,
+              status:
+                nextCollected >= clm.target_amount ? 'completed' : clm.status,
+            };
+          })
+        );
+      } else {
+        setApartments((prev) =>
+          prev.map((apt) =>
+            apt.apartment_number === input.apartmentNumber &&
+            apt.building_id === currentBuilding.id
+              ? {
+                  ...apt,
+                  payment_status: 'paid',
+                  unpaid_months_count: 0,
+                  unpaid_amount: 0,
+                }
+              : apt
+          )
+        );
+      }
+
+      // If resident exists, send notification
+      if (input.residentId) {
+        await pushAndRecordNotification({
+          recipientId: input.residentId,
+          recipientRole: 'resident',
+          recipientPushToken: usersByRole.resident.push_token,
+          buildingId: currentBuilding.id,
+          title: `تم تسجيل سدادك النقدي بنجاح (شقة ${input.apartmentNumber}) 💵`,
+          body: `سجّل رئيس الاتحاد استلام مبلغ ${input.amount.toLocaleString()} ج.م نقداً وأُضيفت لرصيد الخزينة.`,
+          category: 'financial',
+          badgeLabel: 'سداد نقدي',
+          isUrgent: false,
+          metadata: {
+            apartment_number: input.apartmentNumber,
+            amount: input.amount,
+            payment_id: paymentId,
+          },
+        });
+      }
+    },
+    [
+      currentBuilding.id,
+      isCurrentBuildingWritable,
+      pushAndRecordNotification,
+      usersByRole.admin.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  // 7. Scenario 3: Bulk Reminder ("تذكير الكل") for all unpaid apartments in current month
+  const sendBulkUnpaidReminder = useCallback(
+    async (customMessage?: string) => {
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      if (isSupabaseConfigured) {
+        try {
+          await secureRpc.sendBulkUnpaidReminder(currentMonth, customMessage);
+        } catch {
+          // Fallback to local state dispatch
+        }
+      }
+
+      const unpaidApts = apartments.filter(
+        (apt) =>
+          apt.building_id === currentBuilding.id &&
+          apt.is_active &&
+          apt.payment_status === 'unpaid'
+      );
+
+      const aptNumbers = unpaidApts.map((a) => a.apartment_number);
+      const count = aptNumbers.length;
+
+      if (count === 0) {
+        return { remindedCount: 0, apartments: [] };
+      }
+
+      const monthName = new Intl.DateTimeFormat('ar-EG', {
+        month: 'long',
+        year: 'numeric',
+      }).format(new Date());
+
+      const title = `تذكير بسداد اشتراك الصيانة (${monthName}) 🔔`;
+
+      // Dispatch targeted notification for each unpaid apartment
+      for (const apt of unpaidApts) {
+        await pushAndRecordNotification({
+          recipientId: apt.resident_id || usersByRole.resident.id,
+          recipientRole: 'resident',
+          recipientPushToken: usersByRole.resident.push_token,
+          buildingId: currentBuilding.id,
+          title,
+          body:
+            customMessage?.trim() ||
+            `مرحباً ساكن شقة (${apt.apartment_number})، نود تذكيركم بسداد اشتراك الصيانة لشهر ${monthName} بقيمة ${currentBuilding.default_monthly_dues} ج.م.`,
+          category: 'financial',
+          badgeLabel: `تذكير متأخرات (${apt.apartment_number})`,
+          isUrgent: true,
+          metadata: {
+            apartment_number: apt.apartment_number,
+            amount: currentBuilding.default_monthly_dues,
+            billing_month: currentMonth,
+            target_apartments: aptNumbers,
+          },
+        });
+      }
+
+      return {
+        remindedCount: count,
+        apartments: aptNumbers,
+      };
+    },
+    [
+      apartments,
+      currentBuilding.default_monthly_dues,
+      currentBuilding.id,
+      currentBuilding.name,
+      pushAndRecordNotification,
+      usersByRole.resident.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  const sendIndividualUnpaidReminder = useCallback(
+    async (apartmentNumber: string, customMessage?: string) => {
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      const targetApt = apartments.find(
+        (a) =>
+          a.building_id === currentBuilding.id &&
+          String(a.apartment_number).trim() === String(apartmentNumber).trim()
+      );
+
+      const monthName = new Intl.DateTimeFormat('ar-EG', {
+        month: 'long',
+        year: 'numeric',
+      }).format(new Date());
+
+      const title = `تذكير بسداد اشتراك الصيانة (${monthName}) 🔔`;
+      const body =
+        customMessage?.trim() ||
+        `مرحباً ساكن شقة (${apartmentNumber})، نود تذكيركم بلطف بسداد اشتراك الصيانة الشهري بقيمة ${currentBuilding.default_monthly_dues} ج.م لضمان انتظام خدمات ومرافق العمارة.`;
+
+      await pushAndRecordNotification({
+        recipientId: targetApt?.resident_id || usersByRole.resident.id,
+        recipientRole: 'resident',
+        recipientPushToken: usersByRole.resident.push_token,
+        buildingId: currentBuilding.id,
+        title,
+        body,
+        category: 'financial',
+        badgeLabel: `تذكير متأخرات (شقة ${apartmentNumber})`,
+        isUrgent: true,
+        metadata: {
+          apartment_number: apartmentNumber,
+          amount: currentBuilding.default_monthly_dues,
+          billing_month: currentMonth,
+        },
+      });
+    },
+    [
+      apartments,
+      currentBuilding.default_monthly_dues,
+      currentBuilding.id,
+      pushAndRecordNotification,
+      usersByRole.resident.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  // 8. Admin creates emergency claim
+  const createEmergencyClaim = useCallback(
+    async (input: {
+      title: string;
+      description: string;
+      category: string;
+      targetAmount: number;
+      distributionType: ClaimDistributionType;
+      dueDate?: string;
+      defaultShareAmount?: number;
+      distributionMode?: 'occupied_only' | 'all_units' | 'equal' | 'custom';
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error(
+          'انتهى اشتراك العمارة (وضع القراءة فقط Read-Only). يرجى تجديد الاشتراك أولاً.'
+        );
+      }
+      if (!currentBuilding.features_config.emergency_claims) {
+        throw new Error(
+          'ميزة المطالبات الطارئة غير مفعلة في باقة العمارة الحالية.'
+        );
+      }
+
+      const occupiedApts = apartments.filter(
+        (a) =>
+          a.building_id === currentBuilding.id &&
+          a.is_active &&
+          (Boolean(a.resident_id) ||
+            (a.occupant_name &&
+              a.occupant_name.trim() !== '' &&
+              a.occupant_name !== 'وحدة شاغرة' &&
+              a.occupant_name !== 'شاغرة'))
+      );
+      const isOccupiedOnly = input.distributionMode === 'occupied_only';
+      const denominator = isOccupiedOnly
+        ? Math.max(occupiedApts.length, 1)
+        : Math.max(currentBuilding.total_apartments, 1);
+
+      const shareAmount =
+        input.defaultShareAmount ??
+        Math.round((input.targetAmount / denominator) * 100) / 100;
+
+      let serverClaimId: string | null = null;
+      if (isSupabaseConfigured) {
+        try {
+          const rpcRes = await secureRpc.createEmergencyClaim({
+            ...input,
+            defaultShareAmount: shareAmount,
+            occupiedOnly: isOccupiedOnly,
+            adminId: usersByRole.admin.id,
+            buildingId: currentBuilding.id,
+          });
+          if (rpcRes?.data?.claim_id) {
+            serverClaimId = String(rpcRes.data.claim_id);
+          }
+        } catch (rpcErr) {
+          console.warn('createEmergencyClaim error:', rpcErr);
+        }
+      }
+
+      const assignedClaimId = serverClaimId || ('clm-' + Date.now());
+      const newClaim: EmergencyClaim = {
+        id: assignedClaimId,
+        building_id: currentBuilding.id,
+        created_by: usersByRole.admin.id,
+        title: input.title.trim(),
+        description: input.description.trim(),
+        category: input.category,
+        target_amount: input.targetAmount,
+        collected_amount: 0,
+        distribution_type: input.distributionType,
+        default_share_amount: shareAmount,
+        due_date: input.dueDate || '2024-12-30',
+        status: 'active',
+        contributors_count: 0,
+        created_at: new Date().toISOString(),
+      };
+
+      setEmergencyClaims((prev) => [newClaim, ...prev]);
+
+      // Notify all residents of the new emergency claim
+      await pushAndRecordNotification({
+        recipientId: usersByRole.resident.id,
+        recipientRole: 'resident',
+        recipientPushToken: usersByRole.resident.push_token,
+        buildingId: currentBuilding.id,
+        title: `مطالبة صيانة طارئة جديدة: ${input.title.trim()} 🚨`,
+        body: `تم إطلاق مطالبة طارئة بإجمالي ${input.targetAmount.toLocaleString()} ج.م (نصيب الوحدة: ${shareAmount.toLocaleString()} ج.م). يرجى المساهمة عبر التطبيق.`,
+        category: 'maintenance',
+        badgeLabel: 'طوارئ عاجلة',
+        isUrgent: true,
+        metadata: {
+          amount: shareAmount,
+        },
+      });
+    },
+    [
+      apartments,
+      currentBuilding,
+      isCurrentBuildingWritable,
+      pushAndRecordNotification,
+      usersByRole.admin.id,
+      usersByRole.resident.id,
+      usersByRole.resident.push_token,
+    ]
+  );
+
+  // 8B. Admin closes an emergency claim with a compressed official invoice
+  const closeEmergencyClaimWithInvoice = useCallback(
+    async (input: {
+      claimId: string;
+      invoiceImageUrl: string;
+      actualAmount?: number;
+      invoiceNumber?: string;
+      notes?: string;
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error(
+          'انتهى اشتراك العمارة (وضع القراءة فقط Read-Only). يرجى تجديد الاشتراك أولاً.'
+        );
+      }
+
+      const targetClaim = emergencyClaims.find((c) => c.id === input.claimId);
+      if (!targetClaim) {
+        throw new Error('المطالبة الطارئة غير موجودة.');
+      }
+
+      const finalAmount =
+        input.actualAmount && input.actualAmount > 0
+          ? input.actualAmount
+          : targetClaim.collected_amount || targetClaim.target_amount;
+
+      if (isSupabaseConfigured) {
+        try {
+          await secureRpc.recordBuildingExpense({
+            title: `إغلاق مطالبة طارئة: ${targetClaim.title}`,
+            amount: finalAmount,
+            category: targetClaim.category || 'صيانة ومصاعد',
+            description:
+              input.notes?.trim() ||
+              `فاتورة إقفال المطالبة الاستثنائية (${targetClaim.title})`,
+            invoiceImageUrl: input.invoiceImageUrl,
+            invoiceNumber: input.invoiceNumber,
+          });
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      setEmergencyClaims((prev) =>
+        prev.map((c) =>
+          c.id === input.claimId ? { ...c, status: 'completed' } : c
+        )
+      );
+
+      const closingExpense: Expense = {
+        id: 'exp-clm-' + Date.now(),
+        building_id: currentBuilding.id,
+        created_by: usersByRole.admin.id,
+        title: `إغلاق مطالبة طارئة: ${targetClaim.title}`,
+        description:
+          input.notes?.trim() ||
+          `فاتورة إقفال المطالبة الاستثنائية (${targetClaim.title})`,
+        category: targetClaim.category || 'صيانة ومصاعد',
+        amount: finalAmount,
+        expense_date: new Date().toISOString().slice(0, 10),
+        expense_month: '2024-11',
+        invoice_image_url: input.invoiceImageUrl,
+        invoice_number:
+          input.invoiceNumber?.trim() ||
+          '#CLM-' + Math.floor(1000 + Math.random() * 9000),
+        voucher_number: 'PC-2024-' + Math.floor(100 + Math.random() * 900),
+        is_system_generated: false,
+        created_at: new Date().toISOString(),
+      };
+
+      setExpenses((prev) => [closingExpense, ...prev]);
+      setBuildings((prev) =>
+        prev.map((b) =>
+          b.id === currentBuilding.id
+            ? { ...b, fund_balance: b.fund_balance - finalAmount }
+            : b
+        )
+      );
+    },
+    [
+      currentBuilding.id,
+      emergencyClaims,
+      isCurrentBuildingWritable,
+      usersByRole.admin.id,
+    ]
+  );
+
+  // 9. Admin records building expense & deducts from fund_balance
+  const recordBuildingExpense = useCallback(
+    async (input: {
+      title: string;
+      amount: number;
+      category: string;
+      description?: string;
+      invoiceImageUrl?: string;
+      invoiceNumber?: string;
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error(
+          'انتهى اشتراك العمارة (وضع القراءة فقط Read-Only). لا يمكن إضافة مصروفات جديدة قبل تجديد الاشتراك.'
+        );
+      }
+
+      if (isSupabaseConfigured) {
+        try {
+          await secureRpc.recordBuildingExpense(input);
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      const newExpense: Expense = {
+        id: 'exp-' + Date.now(),
+        building_id: currentBuilding.id,
+        created_by: usersByRole.admin.id,
+        title: input.title.trim(),
+        description:
+          input.description?.trim() || 'قيد مصروف معتمد من مجلس الاتحاد',
+        category: input.category,
+        amount: input.amount,
+        expense_date: new Date().toISOString().slice(0, 10),
+        expense_month: '2024-11',
+        invoice_image_url:
+          input.invoiceImageUrl ||
+          'https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=800&q=80',
+        invoice_number:
+          input.invoiceNumber ||
+          '#INV-' + Math.floor(1000 + Math.random() * 9000),
+        voucher_number: 'PC-2024-' + Math.floor(100 + Math.random() * 900),
+        is_system_generated: false,
+        created_at: new Date().toISOString(),
+      };
+
+      setExpenses((prev) => [newExpense, ...prev]);
+      setBuildings((prev) =>
+        prev.map((b) =>
+          b.id === currentBuilding.id
+            ? { ...b, fund_balance: b.fund_balance - input.amount }
+            : b
+        )
+      );
+    },
+    [currentBuilding.id, isCurrentBuildingWritable, usersByRole.admin.id]
+  );
+
+  // 10. Admin adds new apartment unit (with pre-registered occupant_name, occupant_phone & initial arrears)
+  const addApartmentUnit = useCallback(
+    async (input: {
+      apartmentNumber: string;
+      floorNumber: string;
+      wingOrDirection: string;
+      areaSqm: number;
+      residentName?: string;
+      residentPhone?: string;
+      arrearsAmount?: number;
+    }) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+
+      const plan = plans.find((p) => p.code === currentBuilding.plan_code);
+      const maxUnits =
+        currentBuilding.max_apartments_override ??
+        plan?.max_apartments ??
+        30;
+
+      const currentBuildingUnits = apartments.filter(
+        (a) => a.building_id === currentBuilding.id && a.is_active
+      );
+      if (currentBuildingUnits.length >= maxUnits) {
+        throw new Error(
+          `تم الوصول للحد الأقصى للشقق المسموح به في باقة العمارة (${maxUnits} شقة).`
+        );
+      }
+
+      const newUnitId = 'apt-' + Date.now();
+      const initialArrears =
+        input.arrearsAmount !== undefined && input.arrearsAmount >= 0
+          ? input.arrearsAmount
+          : currentBuilding.default_monthly_dues;
+      const occupantNameTrimmed = input.residentName?.trim() || null;
+      const occupantPhoneTrimmed = input.residentPhone?.trim() || null;
+
+      const newUnit: Apartment = {
+        id: newUnitId,
+        building_id: currentBuilding.id,
+        apartment_number: input.apartmentNumber.trim(),
+        floor_number: input.floorNumber.trim(),
+        wing_or_direction: input.wingOrDirection.trim() || 'واجهة',
+        area_sqm: input.areaSqm || 150,
+        ownership_share_percent: Number(
+          (100 / Math.max(currentBuilding.total_apartments, 1)).toFixed(2)
+        ),
+        occupant_name: occupantNameTrimmed,
+        occupant_phone: occupantPhoneTrimmed,
+        arrears_amount: initialArrears,
+        resident_id: null,
+        resident_name: occupantNameTrimmed
+          ? `${occupantNameTrimmed} (مسجل مبدئياً)`
+          : 'وحدة شاغرة (بانتظار التسجيل)',
+        resident_phone: occupantPhoneTrimmed || '',
+        payment_status: initialArrears > 0 ? 'unpaid' : 'paid',
+        unpaid_months_count: initialArrears > 0 ? 1 : 0,
+        unpaid_amount: initialArrears,
+        invite_code: `${currentBuilding.building_code}-${input.apartmentNumber.trim()}`,
+        is_active: true,
+      };
+
+      setApartments((prev) => [newUnit, ...prev]);
+
+      if (initialArrears > 0) {
+        const initObligation: ApartmentObligation = {
+          id: 'obl-' + Date.now(),
+          building_id: currentBuilding.id,
+          apartment_id: newUnitId,
+          apartment_number: input.apartmentNumber.trim(),
+          title: 'رصيد متأخرات / اشتراك مبدئي مسجل من الإدارة',
+          category: 'monthly_dues',
+          billing_month: '2024-11',
+          amount: initialArrears,
+          status: 'unpaid',
+          notes: occupantNameTrimmed
+            ? `مسجل مبدئياً باسم: ${occupantNameTrimmed}`
+            : 'قيد مبدئي عند تأسيس الوحدة',
+          created_at: new Date().toISOString(),
+        };
+        setApartmentObligations((prev) => [initObligation, ...prev]);
+      }
+    },
+    [apartments, currentBuilding, isCurrentBuildingWritable, plans]
+  );
+
+  const updateApartmentUnit = useCallback(
+    async (
+      apartmentId: string,
+      updates: {
+        apartmentNumber?: string;
+        floorNumber?: string;
+        wingOrDirection?: string;
+        areaSqm?: number;
+        residentName?: string;
+        residentPhone?: string;
+      }
+    ) => {
+      setApartments((prev) =>
+        prev.map((apt) => {
+          if (apt.id !== apartmentId) return apt;
+          const occName =
+            updates.residentName !== undefined
+              ? updates.residentName.trim() || null
+              : apt.occupant_name;
+          const occPhone =
+            updates.residentPhone !== undefined
+              ? updates.residentPhone.trim() || null
+              : apt.occupant_phone;
+          const aptNum =
+            updates.apartmentNumber !== undefined
+              ? updates.apartmentNumber.trim()
+              : apt.apartment_number;
+          return {
+            ...apt,
+            apartment_number: aptNum,
+            floor_number:
+              updates.floorNumber !== undefined
+                ? updates.floorNumber.trim()
+                : apt.floor_number,
+            wing_or_direction:
+              updates.wingOrDirection !== undefined
+                ? updates.wingOrDirection.trim()
+                : apt.wing_or_direction,
+            area_sqm:
+              updates.areaSqm !== undefined ? updates.areaSqm : apt.area_sqm,
+            occupant_name: occName,
+            occupant_phone: occPhone,
+            resident_name: occName
+              ? `${occName} (مسجل مبدئياً)`
+              : 'وحدة شاغرة (بانتظار التسجيل)',
+            resident_phone: occPhone || '',
+            invite_code: `${currentBuilding.building_code}-${aptNum}`,
+          };
+        })
+      );
+    },
+    [currentBuilding.building_code]
+  );
+
+  const deleteApartmentUnit = useCallback(async (apartmentId: string) => {
+    setApartments((prev) => prev.filter((a) => a.id !== apartmentId));
+    setApartmentObligations((prev) =>
+      prev.filter((o) => o.apartment_id !== apartmentId)
+    );
+  }, []);
+
+  // 11. Admin submits app subscription invoice
+  const submitAppSubscriptionInvoice = useCallback(
+    async (input: {
+      planCode: PlanTier;
+      durationMonths: number;
+      receiptImageUrl: string;
+      notes?: string;
+    }) => {
+      if (isSupabaseConfigured) {
+        try {
+          await secureRpc.submitAppSubscriptionInvoice(input);
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      const plan = plans.find((p) => p.code === input.planCode);
+      const monthlyPrice =
+        currentBuilding.custom_monthly_price ??
+        plan?.default_monthly_price ??
+        150;
+      const totalAmount = monthlyPrice * Math.max(input.durationMonths, 1);
+
+      const newInvoice: AppSubscriptionInvoice = {
+        id: 'sub-inv-' + Date.now(),
+        building_id: currentBuilding.id,
+        building_name: currentBuilding.name,
+        building_code: currentBuilding.building_code,
+        submitted_by: usersByRole.admin.id,
+        admin_name: usersByRole.admin.full_name,
+        plan_code: input.planCode,
+        amount: totalAmount,
+        duration_months: input.durationMonths,
+        receipt_image_url: input.receiptImageUrl,
+        notes: input.notes || 'إيصال تحويل قيمة اشتراك باقة العمارة',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      };
+
+      setSubscriptionInvoices((prev) => [newInvoice, ...prev]);
+    },
+    [currentBuilding, plans, usersByRole.admin]
+  );
+
+  // 12. Super Admin activates building subscription
+  const activateBuildingSubscription = useCallback(
+    async (invoiceId: string) => {
+      if (currentRole !== 'super_admin') {
+        throw new Error(
+          'Security Violation: تفعيل الاشتراكات متاح حصرياً لمالك التطبيق (super_admin).'
+        );
+      }
+
+      if (processingIds[invoiceId]) {
+        throw new Error('جاري تفعيل هذا الاشتراك بالفعل...');
+      }
+
+      const targetInvoice = subscriptionInvoices.find(
+        (inv) => inv.id === invoiceId
+      );
+      if (!targetInvoice) {
+        throw new Error('فاتورة الاشتراك غير موجودة.');
+      }
+
+      if (targetInvoice.status !== 'pending') {
+        throw new Error(
+          `منع التكرار المزدوج (Idempotency): تم تفعيل هذه الفاتورة مسبقاً (${targetInvoice.status}).`
+        );
+      }
+
+      setProcessingIds((prev) => ({ ...prev, [invoiceId]: true }));
+
+      try {
+        if (isSupabaseConfigured) {
+          try {
+            await secureRpc.activateBuildingSubscription(invoiceId);
+          } catch {
+            // Graceful fallback
+          }
+        }
+
+        // 1. Mark invoice as approved
+        setSubscriptionInvoices((prev) =>
+          prev.map((inv) =>
+            inv.id === invoiceId
+              ? {
+                  ...inv,
+                  status: 'approved',
+                  activated_by: usersByRole.super_admin.id,
+                  activated_at: new Date().toISOString(),
+                }
+              : inv
+          )
+        );
+
+        // 2. Extend building subscription AND deduct invoice amount from fund_balance
+        const extendedDate = new Date(
+          Date.now() + targetInvoice.duration_months * 30 * 86400000
+        ).toISOString();
+
+        setBuildings((prev) =>
+          prev.map((b) =>
+            b.id === targetInvoice.building_id
+              ? {
+                  ...b,
+                  plan_code: targetInvoice.plan_code,
+                  subscription_status: 'active',
+                  subscription_ends_at: extendedDate,
+                  fund_balance: b.fund_balance - targetInvoice.amount,
+                }
+              : b
+          )
+        );
+
+        // 3. Automatically insert transparency expense: "رسوم اشتراك تطبيق إدارة العقار"
+        const autoExpense: Expense = {
+          id: 'exp-sub-' + Date.now(),
+          building_id: targetInvoice.building_id,
+          created_by: targetInvoice.submitted_by,
+          title: 'رسوم اشتراك تطبيق إدارة العقار',
+          description: `تفعيل باقة (${targetInvoice.plan_code.toUpperCase()}) لمدة (${targetInvoice.duration_months}) شهر - قيد آلي معتمد من إدارة المنصة`,
+          category: 'اشتراكات وخدمات رقمية',
+          amount: targetInvoice.amount,
+          expense_date: new Date().toISOString().slice(0, 10),
+          expense_month: '2024-11',
+          invoice_image_url: targetInvoice.receipt_image_url,
+          invoice_number: 'SUB-' + targetInvoice.id.slice(-6).toUpperCase(),
+          voucher_number: 'AUTO-SUB-' + Math.floor(100 + Math.random() * 900),
+          is_system_generated: true,
+          app_subscription_invoice_id: targetInvoice.id,
+          created_at: new Date().toISOString(),
+        };
+
+        setExpenses((prev) => [autoExpense, ...prev]);
+
+        // Notify Building Admin
+        await pushAndRecordNotification({
+          recipientId: targetInvoice.submitted_by,
+          recipientRole: 'admin',
+          recipientPushToken: usersByRole.admin.push_token,
+          buildingId: targetInvoice.building_id,
+          title: `تم تفعيل باقة (${targetInvoice.building_name}) بنجاح 🎉`,
+          body: `تم تمديد اشتراك العمارة وإدراج مصروف "رسوم اشتراك تطبيق إدارة العقار" بقيمة ${targetInvoice.amount} ج.م تلقائياً في سجل الشفافية.`,
+          category: 'financial',
+          badgeLabel: 'تفعيل الباقة',
+          isUrgent: false,
+        });
+      } finally {
+        setProcessingIds((prev) => ({ ...prev, [invoiceId]: false }));
+      }
+    },
+    [
+      currentRole,
+      processingIds,
+      pushAndRecordNotification,
+      subscriptionInvoices,
+      usersByRole.admin.push_token,
+      usersByRole.super_admin.id,
+    ]
+  );
+
+  // 13. Super Admin configures per-building custom price, apartment limit & feature flags
+  const superAdminConfigureBuilding = useCallback(
+    async (input: {
+      buildingId: string;
+      planCode?: PlanTier;
+      customMonthlyPrice?: number | null;
+      maxApartmentsOverride?: number | null;
+      featuresConfig?: Partial<FeaturesConfig>;
+      subscriptionStatus?: BuildingSubscriptionStatus;
+    }) => {
+      if (currentRole !== 'super_admin') {
+        throw new Error('Unauthorized: Super Admin role required.');
+      }
+
+      if (isSupabaseConfigured) {
+        try {
+          await secureRpc.superAdminConfigureBuilding(input);
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      setBuildings((prev) =>
+        prev.map((b) => {
+          if (b.id !== input.buildingId) return b;
+          return {
+            ...b,
+            plan_code: input.planCode ?? b.plan_code,
+            custom_monthly_price:
+              input.customMonthlyPrice !== undefined
+                ? input.customMonthlyPrice
+                : b.custom_monthly_price,
+            max_apartments_override:
+              input.maxApartmentsOverride !== undefined
+                ? input.maxApartmentsOverride
+                : b.max_apartments_override,
+            features_config: input.featuresConfig
+              ? { ...b.features_config, ...input.featuresConfig }
+              : b.features_config,
+            subscription_status:
+              input.subscriptionStatus ?? b.subscription_status,
+          };
+        })
+      );
+    },
+    [currentRole]
+  );
+
+  // 14. Super Admin updates global plan templates (free, pro, plus)
+  const superAdminUpdatePlanTemplate = useCallback(
+    (code: PlanTier, updates: Partial<SubscriptionPlan>) => {
+      setPlans((prev) =>
+        prev.map((plan) => (plan.code === code ? { ...plan, ...updates } : plan))
+      );
+    },
+    []
+  );
+
+  return (
+    <AppContext.Provider
+      value={{
+        currentRole,
+        currentUser,
+        isAuthenticated,
+        switchRole,
+        setAuthenticated,
+        plans,
+        buildings,
+        currentBuilding,
+        apartments,
+        apartmentObligations,
+        pendingResidents,
+        payments,
+        emergencyClaims,
+        expenses,
+        subscriptionInvoices,
+        expoPushToken,
+        notifications,
+        currentRoleNotifications,
+        unreadNotificationsCount,
+        activeBannerNotification,
+        dismissBannerNotification,
+        markAllNotificationsAsRead,
+        markNotificationAsRead,
+        sendBulkUnpaidReminder,
+        sendIndividualUnpaidReminder,
+        processingIds,
+        isCurrentBuildingWritable,
+        refreshData: loadDataFromSupabase,
+        createBuildingForAdmin,
+        requestJoinBuilding,
+        reviewResidentJoinRequest,
+        transferApartmentObligations,
+        addApartmentObligation,
+        submitResidentPayment,
+        approveResidentPayment,
+        rejectResidentPayment,
+        recordDirectCashPayment,
+        createEmergencyClaim,
+        closeEmergencyClaimWithInvoice,
+        recordBuildingExpense,
+        addApartmentUnit,
+        updateApartmentUnit,
+        deleteApartmentUnit,
+        submitAppSubscriptionInvoice,
+        activateBuildingSubscription,
+        superAdminConfigureBuilding,
+        superAdminUpdatePlanTemplate,
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useAppStore = (): AppContextType => {
+  const ctx = useContext(AppContext);
+  if (!ctx) {
+    throw new Error('useAppStore must be used within an AppProvider');
+  }
+  return ctx;
+};

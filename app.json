@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "مدير اتحاد الملاك",
+    "slug": "ittihad-trust-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F8FAFC",
+    "primaryColor": "#1E293B",
+    "extra": {
+      "supportsRTL": true,
+      "forcesRTL": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ittihadtrust.mobile",
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "ar"
+      }
+    },
+    "android": {
+      "package": "com.ittihadtrust.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#1E293B"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

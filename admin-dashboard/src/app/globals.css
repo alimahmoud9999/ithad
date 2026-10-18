@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Readex+Pro:wght@400;500;600;700&display=swap');
+
+:root {
+  --primary-navy: #1E293B;
+  --emerald-success: #10B981;
+  --accent-orange: #F97316;
+  --amber-pending: #F59E0B;
+  --danger-red: #EF4444;
+  --bg-slate: #F8FAFC;
+}
+
+body {
+  font-family: 'Readex Pro', 'Cairo', sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  direction: rtl;
+}

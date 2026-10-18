@@ -1,0 +1,39 @@
+{
+  "name": "ittihad-trust-mobile",
+  "version": "1.0.0",
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@reduxjs/toolkit": "^2.2.7",
+    "@supabase/supabase-js": "^2.45.4",
+    "expo": "~57.0.30",
+    "expo-clipboard": "~57.0.2",
+    "expo-device": "~57.0.2",
+    "expo-image-manipulator": "~57.0.21",
+    "expo-image-picker": "~57.0.20",
+    "expo-linear-gradient": "~57.0.2",
+    "expo-notifications": "~57.0.23",
+    "expo-status-bar": "~57.0.1",
+    "nativewind": "^2.0.11",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-url-polyfill": "^2.0.0",
+    "react-redux": "^9.1.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/react": "~19.2.4",
+    "tailwindcss": "3.3.2",
+    "typescript": "~6.0.3"
+  },
+  "private": true
+}

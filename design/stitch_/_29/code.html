@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{width:100%;margin:0;padding:0;min-height:100%;}body{overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "tertiary": "#201100", "on-secondary-container": "#00714d", "tertiary-fixed": "#ffddb8", "on-surface": "#0b1c30", "error": "#ba1a1a", "surface-bright": "#f8f9ff", "primary-container": "#1e293b", "primary-fixed": "#d8e3fb", "border-subtle": "#E2E8F0", "surface-container-low": "#eff4ff", "secondary": "#006c49", "tertiary-fixed-dim": "#ffb95f", "status-pending": "#F97316", "surface-container": "#e5eeff", "tertiary-container": "#3c2300", "inverse-primary": "#bcc7de", "primary": "#091426", "surface-card": "#FFFFFF", "surface-container-lowest": "#ffffff", "status-paid": "#10B981", "inverse-on-surface": "#eaf1ff", "on-secondary-fixed-variant": "#005236", "inverse-surface": "#213145", "secondary-fixed": "#6ffbbe", "on-tertiary-fixed-variant": "#653e00", "secondary-fixed-dim": "#4edea3", "secondary-container": "#6cf8bb", "outline": "#75777d", "surface-dim": "#cbdbf5", "status-unpaid": "#EF4444", "surface-container-high": "#dce9ff", "on-tertiary-container": "#c88000", "on-error": "#ffffff", "on-primary": "#ffffff", "surface": "#f8f9ff", "error-container": "#ffdad6", "on-secondary-fixed": "#002113", "surface-tint": "#545f73", "on-background": "#0b1c30", "on-tertiary": "#ffffff", "surface-canvas": "#F8FAFC", "on-primary-container": "#8590a6", "status-upcoming": "#F59E0B", "primary-fixed-dim": "#bcc7de", "background": "#f8f9ff", "surface-variant": "#d3e4fe", "on-primary-fixed-variant": "#3c475a", "outline-variant": "#c5c6cd", "surface-container-highest": "#d3e4fe", "on-surface-variant": "#45474c", "on-tertiary-fixed": "#2a1700", "on-primary-fixed": "#111c2d", "on-error-container": "#93000a", "on-secondary": "#ffffff" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-xl": "2rem", "gutter": "1rem", "space-md": "1rem", "space-xs": "0.25rem", "space-sm": "0.5rem", "margin": "1rem", "space-lg": "1.5rem" }, "fontFamily": { "title-sm": ["Plus Jakarta Sans"], "body-md": ["Plus Jakarta Sans"], "label-md": ["Inter"], "display": ["Plus Jakarta Sans"], "label-sm": ["Inter"], "body-lg": ["Plus Jakarta Sans"], "numeric-hero": ["Inter"], "headline-lg": ["Plus Jakarta Sans"], "body-sm": ["Plus Jakarta Sans"], "headline-md": ["Plus Jakarta Sans"], "label-lg": ["Inter"] }, "fontSize": { "title-sm": ["16px", { "lineHeight": "24px", "fontWeight": "600" }], "body-md": ["14px", { "lineHeight": "22px", "fontWeight": "400" }], "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500" }], "display": ["32px", { "lineHeight": "44px", "fontWeight": "700" }], "label-sm": ["10px", { "lineHeight": "14px", "letterSpacing": "0.03em", "fontWeight": "500" }], "body-lg": ["16px", { "lineHeight": "26px", "fontWeight": "400" }], "numeric-hero": ["28px", { "lineHeight": "36px", "fontWeight": "700" }], "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }], "body-sm": ["12px", { "lineHeight": "18px", "fontWeight": "400" }], "headline-md": ["20px", { "lineHeight": "30px", "fontWeight": "600" }], "label-lg": ["14px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600" }] } } } };</script><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-surface-canvas font-body-md text-on-surface antialiased flex flex-col min-h-screen"><header class="fixed top-0 w-full z-50 pt-safe bg-surface-card/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><div class="w-9 h-9 rounded-xl bg-primary-container flex items-center justify-center text-on-primary shadow-sm"><span class="material-symbols-outlined text-[20px]">apartment</span></div><div class="flex flex-col text-right"><span class="font-label-sm text-on-surface-variant leading-none">مدير اتحاد الملاك</span><h1 class="font-title-sm text-title-sm text-on-surface truncate max-w-[170px]">برج الأمل - شقة 12</h1></div></div><div class="flex items-center gap-space-xs"><button aria-label="التنبيهات" class="relative w-11 h-11 flex items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"><span class="material-symbols-outlined text-[22px]">notifications</span><span class="absolute top-2.5 start-2.5 w-2 h-2 rounded-full bg-status-unpaid ring-2 ring-surface-card"></span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex flex-col relative w-full px-margin pt-16 pb-28 bg-surface-canvas flex-1"><div class="flex flex-col w-full pb-6 text-right" dir="rtl">
+<!-- Top Title Context & Micro Trust Pill -->
+<div class="flex flex-col gap-space-xs mb-space-md">
+<div class="flex items-center justify-between">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface font-bold tracking-tight">لوحة المصروفات والشفافية</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">برج الأمل • تقرير المصروفات وسجل الفواتير المعتمدة</p>
+</div>
+<div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary/10 text-secondary">
+<span class="material-symbols-outlined text-[15px]" style="font-variation-settings: 'FILL' 1;">verified</span>
+<span class="font-label-sm text-label-sm font-semibold">تدقيق نشط</span>
+</div>
+</div>
+</div>
+<!-- Horizontal Month Selector -->
+<div class="w-full overflow-x-auto no-scrollbar -mx-margin px-margin mb-space-lg flex items-center gap-space-xs">
+<button class="shrink-0 px-4 py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-sm transition-all flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]">calendar_today</span>
+<span>نوفمبر 2024 (الحالي)</span>
+</button>
+<button class="shrink-0 px-4 py-2 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm transition-all hover:bg-surface-container">
+      أكتوبر 2024
+    </button>
+<button class="shrink-0 px-4 py-2 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm transition-all hover:bg-surface-container">
+      سبتمبر 2024
+    </button>
+<button class="shrink-0 px-4 py-2 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm transition-all hover:bg-surface-container">
+      أغسطس 2024
+    </button>
+</div>
+<!-- Monthly Financial Overview Hero Card -->
+<div class="w-full rounded-2xl bg-gradient-to-br from-[#1E293B] via-[#0F172A] to-[#091426] text-on-primary p-5 shadow-md relative overflow-hidden mb-space-lg">
+<!-- Subtle Ambient Glow -->
+<div class="absolute -top-12 -start-12 w-36 h-36 rounded-full bg-secondary/20 blur-2xl pointer-events-none"></div>
+<div class="absolute -bottom-10 -end-10 w-32 h-32 rounded-full bg-status-upcoming/15 blur-2xl pointer-events-none"></div>
+<div class="relative z-10 flex flex-col gap-4">
+<!-- Surplus Highlight Badge -->
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-primary/70">موقف الميزانية التشغيلية</span>
+<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#10B981]/20 text-[#6ffbbe] shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed"></span>
+<span class="font-label-sm text-label-sm font-semibold">فائض محتجز: + 11,800 ج.م</span>
+</div>
+</div>
+<!-- Core Totals Comparison -->
+<div class="grid grid-cols-2 gap-3 pt-1">
+<!-- Outgoing / Spent -->
+<div class="flex flex-col bg-white/5 p-3 rounded-xl backdrop-blur-sm">
+<div class="flex items-center gap-1.5 text-on-primary/70 mb-1">
+<span class="material-symbols-outlined text-[16px] text-status-unpaid">arrow_outward</span>
+<span class="font-label-sm text-label-sm">المصروفات المنفذة</span>
+</div>
+<span class="font-numeric-hero text-numeric-hero font-bold tracking-tight text-white">- 6,400 <span class="font-label-sm text-label-sm text-on-primary/60">ج.م</span></span>
+</div>
+<!-- Incoming / Collected -->
+<div class="flex flex-col bg-white/5 p-3 rounded-xl backdrop-blur-sm">
+<div class="flex items-center gap-1.5 text-on-primary/70 mb-1">
+<span class="material-symbols-outlined text-[16px] text-status-paid">arrow_downward</span>
+<span class="font-label-sm text-label-sm">المحصل من الملاك</span>
+</div>
+<span class="font-numeric-hero text-numeric-hero font-bold tracking-tight text-secondary-fixed">+ 18,200 <span class="font-label-sm text-label-sm text-on-primary/60">ج.م</span></span>
+</div>
+</div>
+<!-- Budget Consumption Progress Gauge -->
+<div class="flex flex-col gap-1.5 pt-1">
+<div class="flex justify-between items-center font-label-sm text-label-sm text-on-primary/80">
+<span>استهلاك الميزانية المعتمدة لهذا الشهر</span>
+<span class="font-bold text-white">64% (تم صرف 6,400 من 10,000 ج.م)</span>
+</div>
+<div class="w-full h-2 rounded-full bg-white/10 overflow-hidden flex">
+<div class="h-full bg-gradient-to-l from-status-upcoming to-secondary-fixed rounded-full transition-all duration-500" style="width: 64%;"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Trust & Transparency Assurance Banner -->
+<div class="w-full rounded-2xl bg-surface-container-low p-3.5 mb-space-lg flex items-start gap-3 shadow-sm">
+<div class="w-9 h-9 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">shield_with_heart</span>
+</div>
+<div class="flex flex-col">
+<h3 class="font-title-sm text-title-sm text-on-surface font-semibold">مبدأ الشفافية المطلقة</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+        كل قرش يتم إنفاقه موثق بإيصال رسمي ومعتمد من مجلس الإدارة، ومتاح للمعاينة المباشرة والتحميل لجميع الشركاء بالبرج.
+      </p>
+</div>
+</div>
+<!-- Category Breakdown Horizontal Filters -->
+<div class="flex flex-col gap-2 mb-space-md">
+<div class="flex items-center justify-between">
+<h3 class="font-headline-md text-title-sm text-on-surface font-bold">توزيع البنود المعتمدة</h3>
+<span class="font-label-sm text-label-sm text-on-surface-variant">5 فواتير مقيدة</span>
+</div>
+<div class="w-full overflow-x-auto no-scrollbar -mx-margin px-margin flex items-center gap-2 py-1">
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-medium shadow-sm">
+        الكل (5)
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm hover:bg-surface-container">
+        رواتب وأمن (1,500 ج.م)
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm hover:bg-surface-container">
+        صيانة ومصاعد (3,500 ج.م)
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm hover:bg-surface-container">
+        كهرباء ومياه (820 ج.م)
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-surface-card text-on-surface-variant font-label-md text-label-md shadow-sm hover:bg-surface-container">
+        نظافة ومستهلكات (580 ج.م)
+      </button>
+</div>
+</div>
+<!-- Detailed Expenses & Receipts Feed -->
+<div class="flex flex-col gap-space-md">
+<!-- Expense Card 1: Elevator Repair -->
+<div class="w-full rounded-2xl bg-surface-card p-4 shadow-sm flex flex-col gap-3 relative transition-all">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-3">
+<div class="w-11 h-11 rounded-xl bg-status-unpaid/10 text-status-unpaid flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">elevator</span>
+</div>
+<div class="flex flex-col">
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold leading-tight">صيانة طارئة - تغيير سير وواير المصعد</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-2 py-0.5 rounded-md bg-surface-container text-on-surface font-label-sm text-label-sm">صيانة دورية وطارئة</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">12 نوفمبر 2024</span>
+</div>
+</div>
+</div>
+<div class="text-left shrink-0">
+<span class="font-headline-md text-title-sm font-bold text-status-unpaid tracking-tight">- 3,000 ج.م</span>
+</div>
+</div>
+<!-- Approval & Document Attachment Strip -->
+<div class="rounded-xl bg-surface-container-low p-2.5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg overflow-hidden shrink-0 shadow-sm">
+<img class="w-full h-full object-cover" data-alt="Official signed invoice receipt with stamp for elevator maintenance service from Schindler Egypt, soft office ambient lighting, crisp typography, official seal watermark" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAS45LppKx1ADoKPFbqlONLQBMSvQKnpMz9iZI0bhrqOgJbP8cp2yaS2k2hQsgsuBi7_CT4yMj_HDps84KP2ETSISR9IPxcpViNSrDvBnOdtb38LeIhLxrl3M59BbHr6RKreKaI7B8zfA2F8UWVu2xmrKKOTpad7KwsLt_zIKUjMe6nrN0kHZEoyVVrrKOD7v3dKHuq2ZU4BVKots0LAQCqcGVEoqGFy-Ath0elrc8o"/>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface font-semibold">فاتورة ضريبية #INV-4921</span>
+<span class="font-label-sm text-label-sm text-secondary font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+              معتمدة من مجلس الإدارة
+            </span>
+</div>
+</div>
+<button class="px-3 py-1.5 rounded-lg bg-primary text-on-primary font-label-sm text-label-sm font-medium flex items-center gap-1 shadow-sm active:scale-95 transition-transform" onclick="document.getElementById('receipt-modal').classList.remove('hidden')">
+<span>عرض الفاتورة</span>
+<span class="material-symbols-outlined text-[14px]">receipt_long</span>
+</button>
+</div>
+</div>
+<!-- Expense Card 2: Security & Caretaker Salary -->
+<div class="w-full rounded-2xl bg-surface-card p-4 shadow-sm flex flex-col gap-3">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-3">
+<div class="w-11 h-11 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">badge</span>
+</div>
+<div class="flex flex-col">
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold leading-tight">راتب حارس العقار والأمن (عم رجب)</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-2 py-0.5 rounded-md bg-surface-container text-on-surface font-label-sm text-label-sm">أجور ورواتب</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">1 نوفمبر 2024</span>
+</div>
+</div>
+</div>
+<div class="text-left shrink-0">
+<span class="font-headline-md text-title-sm font-bold text-status-unpaid tracking-tight">- 1,500 ج.م</span>
+</div>
+</div>
+<!-- Attachment Strip -->
+<div class="rounded-xl bg-surface-container-low p-2.5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg overflow-hidden shrink-0 shadow-sm">
+<img class="w-full h-full object-cover" data-alt="Paper cash voucher voucher with Arabic handwriting and resident security signature and thumbprint for monthly salary payment, clean neutral lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA1G_918kDSq3xzhOU-K8BNU52ht8TBPIiSlNDTPLlpet12No3LrrJiytSITHh5TcBfHCCKSFeZ7yUceWar6yPLh07ljpq6z47nTZOVY-vUqyHMxbUxKIm81p2SnYexb-X5LFiOOtJLFQCvVzEQ4INO1NXsxUYi6LD247JLhqwnfq1eyyi0NCTOLopE9REClsZ2Wsmx_-gJc_9Hvl42iAw7Lc3W0BpaNudtHBbx-MHF"/>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface font-semibold">إيصال استلام نقدية موقع</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">تسليم كاش بحضور أمين الصندوق</span>
+</div>
+</div>
+<button class="px-3 py-1.5 rounded-lg bg-surface-card text-on-surface font-label-sm text-label-sm font-medium shadow-sm flex items-center gap-1 active:scale-95 transition-transform hover:bg-surface-container">
+<span>عرض السند</span>
+<span class="material-symbols-outlined text-[14px]">visibility</span>
+</button>
+</div>
+</div>
+<!-- Expense Card 3: Electricity Bill -->
+<div class="w-full rounded-2xl bg-surface-card p-4 shadow-sm flex flex-col gap-3">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-3">
+<div class="w-11 h-11 rounded-xl bg-status-upcoming/15 text-status-upcoming flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">electric_bolt</span>
+</div>
+<div class="flex flex-col">
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold leading-tight">فاتورة كهرباء السلم والمصعد والخدمات</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-2 py-0.5 rounded-md bg-surface-container text-on-surface font-label-sm text-label-sm">مرافق حكومية</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">28 أكتوبر 2024</span>
+</div>
+</div>
+</div>
+<div class="text-left shrink-0">
+<span class="font-headline-md text-title-sm font-bold text-status-unpaid tracking-tight">- 820 ج.م</span>
+</div>
+</div>
+<!-- Attachment Strip -->
+<div class="rounded-xl bg-surface-container-low p-2.5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg overflow-hidden shrink-0 shadow-sm">
+<img class="w-full h-full object-cover" data-alt="Fawry printed electronic payment thermal receipt slip with utility code and successful transaction status, high contrast, clean document capture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnKhb1e0sCOVxmqbior6GK9m6TMC9565eUyj0I0eNSPCnQMqGXf5ZBcz_Ucq_R9NqJLxOut_77058DJcKA95SB-laFs-elRLkuISn0bSjeFZ3__q425rB8agGEouEPMmp8MiLDa4k8lMtDutJi60wAvc8zcGUDaG33NC6eiYXNSuGw3LUzOLbjbxUu8yDWTnUrT9MLvrJzu533w8r6jNBNxj6LnRD2xheLkX-UqmVA"/>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface font-semibold">إيصال سداد فوري إلكتروني</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">شركة شمال القاهرة للكهرباء</span>
+</div>
+</div>
+<button class="px-3 py-1.5 rounded-lg bg-surface-card text-on-surface font-label-sm text-label-sm font-medium shadow-sm flex items-center gap-1 active:scale-95 transition-transform hover:bg-surface-container">
+<span>عرض الإيصال</span>
+<span class="material-symbols-outlined text-[14px]">receipt</span>
+</button>
+</div>
+</div>
+<!-- Expense Card 4: Cleaning Supplies & Entrance LEDs -->
+<div class="w-full rounded-2xl bg-surface-card p-4 shadow-sm flex flex-col gap-3">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-3">
+<div class="w-11 h-11 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">cleaning_services</span>
+</div>
+<div class="flex flex-col">
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold leading-tight">مستلزمات نظافة ولمبات ليد للمدخل</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-2 py-0.5 rounded-md bg-surface-container text-on-surface font-label-sm text-label-sm">مستهلكات وصيانة خفيفة</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">5 نوفمبر 2024</span>
+</div>
+</div>
+</div>
+<div class="text-left shrink-0">
+<span class="font-headline-md text-title-sm font-bold text-status-unpaid tracking-tight">- 580 ج.م</span>
+</div>
+</div>
+<!-- Attachment Strip -->
+<div class="rounded-xl bg-surface-container-low p-2.5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center text-on-surface-variant shrink-0">
+<span class="material-symbols-outlined text-[18px]">shopping_cart</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface font-semibold">بون شراء مؤسسة الأمل للتوريدات</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">4 لمبات 18 واط + مواد تنظيف وتطهير</span>
+</div>
+</div>
+<button class="px-3 py-1.5 rounded-lg bg-surface-card text-on-surface font-label-sm text-label-sm font-medium shadow-sm flex items-center gap-1 active:scale-95 transition-transform hover:bg-surface-container">
+<span>عرض البون</span>
+<span class="material-symbols-outlined text-[14px]">attachment</span>
+</button>
+</div>
+</div>
+<!-- Expense Card 5: Water Pump Maintenance -->
+<div class="w-full rounded-2xl bg-surface-card p-4 shadow-sm flex flex-col gap-3">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-3">
+<div class="w-11 h-11 rounded-xl bg-primary-container/10 text-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">water_damage</span>
+</div>
+<div class="flex flex-col">
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold leading-tight">صيانة وتزييت طلمبة المياه الرئيسية</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-2 py-0.5 rounded-md bg-surface-container text-on-surface font-label-sm text-label-sm">صيانة وقائية</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">2 نوفمبر 2024</span>
+</div>
+</div>
+</div>
+<div class="text-left shrink-0">
+<span class="font-headline-md text-title-sm font-bold text-status-unpaid tracking-tight">- 500 ج.م</span>
+</div>
+</div>
+<!-- Attachment Strip -->
+<div class="rounded-xl bg-surface-container-low p-2.5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center text-on-surface-variant shrink-0">
+<span class="material-symbols-outlined text-[18px]">build</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface font-semibold">تقرير الفني المعتمد</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">فحص البلي وتغيير مانع التسريب</span>
+</div>
+</div>
+<button class="px-3 py-1.5 rounded-lg bg-surface-card text-on-surface font-label-sm text-label-sm font-medium shadow-sm flex items-center gap-1 active:scale-95 transition-transform hover:bg-surface-container">
+<span>عرض التقرير</span>
+<span class="material-symbols-outlined text-[14px]">description</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Interactive Realistic Paper Receipt Bottom Sheet Modal -->
+<div class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0F172A]/70 backdrop-blur-sm p-0 sm:p-4 transition-all" id="receipt-modal">
+<!-- Click backdrop to dismiss -->
+<div class="absolute inset-0" onclick="document.getElementById('receipt-modal').classList.add('hidden')"></div>
+<div class="relative w-full max-w-lg bg-surface-card rounded-t-3xl sm:rounded-2xl shadow-2xl p-5 flex flex-col gap-4 max-h-[795px] overflow-y-auto z-10 animate-in fade-in slide-in-from-bottom duration-200">
+<!-- Drag handle -->
+<div class="w-10 h-1 rounded-full bg-outline-variant mx-auto mb-1"></div>
+<!-- Modal Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-9 h-9 rounded-full bg-secondary/10 text-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">fact_check</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm font-bold text-on-surface">معاينة الفاتورة المعتمدة</h4>
+<span class="font-label-sm text-label-sm text-on-surface-variant">مسجلة بالخزينة برقم مرجعي #EXP-2024-89</span>
+</div>
+</div>
+<button class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface hover:bg-surface-variant transition-colors" onclick="document.getElementById('receipt-modal').classList.add('hidden')">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</div>
+<!-- Real Paper Invoice Replica Card -->
+<div class="w-full bg-[#FCFDFD] rounded-xl p-4 shadow-inner relative overflow-hidden flex flex-col gap-3">
+<!-- Paper Texture watermark & Certified Ink Seal -->
+<div class="absolute top-8 left-6 rotate-[-18deg] pointer-events-none opacity-80 select-none">
+<div class="px-3 py-1.5 rounded-lg bg-secondary/15 text-secondary flex flex-col items-center justify-center">
+<span class="font-label-md text-label-md font-bold tracking-wider">معتمد ومدفوع</span>
+<span class="font-label-sm text-label-sm">خزينة برج الأمل</span>
+<span class="font-label-sm text-[9px] text-secondary/80">12 NOV 2024</span>
+</div>
+</div>
+<div class="flex items-center justify-between pb-2">
+<div>
+<span class="font-title-sm text-title-sm font-bold text-[#091426]">مؤسسة شيندلر للمصاعد بمصر</span>
+<p class="font-label-sm text-label-sm text-on-surface-variant">سجل تجاري: 849202 • بطاقة ضريبية: 493-201-99</p>
+</div>
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[22px]">engineering</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-2 text-label-sm font-label-sm bg-surface-container-low p-2.5 rounded-lg">
+<div>
+<span class="text-on-surface-variant block">رقم الإيصال:</span>
+<span class="font-bold text-on-surface">INV-4921</span>
+</div>
+<div>
+<span class="text-on-surface-variant block">تاريخ الإجراء:</span>
+<span class="font-bold text-on-surface">12 نوفمبر 2024</span>
+</div>
+<div>
+<span class="text-on-surface-variant block">الجهة المستفيدة:</span>
+<span class="font-bold text-on-surface">اتحاد ملاك برج الأمل</span>
+</div>
+<div>
+<span class="text-on-surface-variant block">طريقة السداد:</span>
+<span class="font-bold text-secondary">تحويل بنكي فوري (InstaPay)</span>
+</div>
+</div>
+<!-- Line item breakdown -->
+<div class="flex flex-col gap-1.5 py-1">
+<div class="flex justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>تغيير طقم واير سحب رئيسي (إيطالي معتمد)</span>
+<span>2,200 ج.م</span>
+</div>
+<div class="flex justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>مصنعية تركيب واختبار أحمال وضبط الفرامل</span>
+<span>800 ج.م</span>
+</div>
+<div class="flex justify-between font-title-sm text-title-sm font-bold text-on-surface pt-2">
+<span>الإجمالي المسدد بالكامل:</span>
+<span class="text-status-unpaid font-numeric-hero">3,000 ج.م</span>
+</div>
+</div>
+<!-- Realistic Signatures Area -->
+<div class="grid grid-cols-2 gap-4 pt-2">
+<div class="flex flex-col items-center">
+<span class="font-label-sm text-label-sm text-on-surface-variant">توقيع مهندس الصيانة</span>
+<div class="font-label-md text-label-md font-bold text-primary italic py-1">م. طارق عبد المجيد</div>
+</div>
+<div class="flex flex-col items-center">
+<span class="font-label-sm text-label-sm text-on-surface-variant">اعتماد رئيس مجلس الاتحاد</span>
+<div class="font-label-md text-label-md font-bold text-secondary italic py-1">د. حسام الشربيني</div>
+</div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="flex items-center gap-2 pt-1">
+<button class="flex-1 py-3 px-4 rounded-xl bg-primary text-on-primary font-label-lg text-label-lg font-semibold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all">
+<span class="material-symbols-outlined text-[18px]">download</span>
+<span>تحميل الفاتورة PDF</span>
+</button>
+<button class="py-3 px-4 rounded-xl bg-surface-container text-on-surface font-label-lg text-label-lg font-semibold flex items-center justify-center gap-2 hover:bg-surface-variant transition-colors active:scale-95">
+<span class="material-symbols-outlined text-[18px]">share</span>
+<span>مشاركة</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Ensure the bottom tab 'المصروفات' is cleanly highlighted in the global app shell
+  document.addEventListener('DOMContentLoaded', () => {
+    const expenseTab = document.querySelector('nav a[data-path="expenses-and-fund"]');
+    if (expenseTab) {
+      expenseTab.classList.remove('text-on-surface-variant');
+      expenseTab.classList.add('text-primary', 'font-semibold');
+      const icon = expenseTab.querySelector('.material-symbols-outlined');
+      if (icon) {
+        icon.style.fontVariationSettings = "'FILL' 1";
+      }
+    }
+  });
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface-card/95 backdrop-blur-xl shadow-[0_-4px_16px_rgba(15,23,42,0.05)]" data-active-classes="text-primary font-semibold"><div class="flex items-center justify-around h-20 px-space-xs"><a class="flex flex-col items-center justify-center w-16 h-12 gap-space-xs text-on-surface-variant hover:text-on-surface transition-all" data-path="dashboard" href="#"><span class="material-symbols-outlined text-[22px]">dashboard</span><span class="font-label-sm text-label-sm">الرئيسية</span></a><a class="flex flex-col items-center justify-center w-16 h-12 gap-space-xs text-on-surface-variant hover:text-on-surface transition-all" data-path="apartments" href="#"><span class="material-symbols-outlined text-[22px]">meeting_room</span><span class="font-label-sm text-label-sm">الوحدات</span></a><a class="flex flex-col items-center justify-center w-16 h-12 gap-space-xs text-on-surface-variant hover:text-on-surface transition-all" data-path="expenses-and-fund" href="#"><span class="material-symbols-outlined text-[22px]">account_balance_wallet</span><span class="font-label-sm text-label-sm">المصروفات</span></a><a class="flex flex-col items-center justify-center w-16 h-12 gap-space-xs text-on-surface-variant hover:text-on-surface transition-all" data-path="settings" href="#"><span class="material-symbols-outlined text-[22px]">settings</span><span class="font-label-sm text-label-sm">الإعدادات</span></a></div></nav></body></html>
