@@ -64,7 +64,8 @@ export interface Building {
 export type StorageBucketName =
   | 'payment-receipts'
   | 'expense-invoices'
-  | 'subscription-receipts';
+  | 'subscription-receipts'
+  | 'issue-attachments';
 
 export interface Apartment {
   id: string;
@@ -241,5 +242,92 @@ export interface AppNotification {
     target_apartments?: string[];
     [key: string]: any;
   };
+}
+
+export type IssueStatus = 'open' | 'in_progress' | 'resolved';
+export type IssueSeverity = 'low' | 'medium' | 'high';
+
+export interface BuildingIssue {
+  id: string;
+  building_id: string;
+  created_by: string;
+  apartment_id: string | null;
+  apartment_number: string;
+  reporter_name: string;
+  title: string;
+  description?: string;
+  category: string;
+  severity: IssueSeverity;
+  image_url?: string | null;
+  is_private: boolean;
+  upvotes_count: number;
+  status: IssueStatus;
+  preferred_time?: string;
+  whatsapp_notifications: boolean;
+  resolved_at?: string | null;
+  has_upvoted?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IssueUpvote {
+  id: string;
+  issue_id: string;
+  building_id: string;
+  apartment_id: string;
+  apartment_number: string;
+  user_id: string;
+  created_at: string;
+}
+
+export interface PollOption {
+  id: string;
+  title: string;
+}
+
+export interface PollVote {
+  id: string;
+  poll_id: string;
+  building_id: string;
+  apartment_id: string;
+  apartment_number: string;
+  voter_id: string;
+  voter_name?: string;
+  choice: string;
+  weight_percent?: number;
+  created_at: string;
+}
+
+export interface Poll {
+  id: string;
+  building_id: string;
+  created_by: string;
+  session_code?: string;
+  title: string;
+  description?: string;
+  category?: string;
+  estimated_cost?: number;
+  share_per_unit?: number;
+  document_url?: string;
+  quorum_percent: number;
+  voting_basis: string;
+  ends_at: string;
+  status: 'active' | 'closed' | 'cancelled';
+  options: PollOption[];
+  votes_count: number;
+  is_urgent?: boolean;
+  created_at: string;
+  updated_at: string;
+  user_voted_choice?: string | null;
+  options_stats?: {
+    [choiceId: string]: {
+      count: number;
+      percentage: number;
+      apartments: string[];
+    };
+  };
+  total_voted_units?: number;
+  total_building_units?: number;
+  participation_percent?: number;
 }
 

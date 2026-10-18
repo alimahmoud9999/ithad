@@ -46,6 +46,7 @@ export type ClaimDistChoice = 'occupied_only' | 'equal' | 'custom';
 
 interface AdminDashboardScreenProps {
   onNavigateExpenses: () => void;
+  onNavigateSettings?: () => void;
 }
 
 /**
@@ -58,6 +59,7 @@ interface AdminDashboardScreenProps {
  */
 export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   onNavigateExpenses,
+  onNavigateSettings,
 }) => {
   const {
     currentUser,
@@ -83,6 +85,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   } = useAppStore();
 
   // Modals State
+  const [quickActionsModalVisible, setQuickActionsModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [emergencyModalVisible, setEmergencyModalVisible] = useState(false);
   const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
@@ -512,11 +515,12 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       {/* Read-Only Subscription Warning Banner (if expired) */}
       {!isCurrentBuildingWritable && (
         <View style={styles.readOnlyBanner}>
@@ -538,7 +542,13 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
           </View>
           <TouchableOpacity
             style={styles.renewNowBtn}
-            onPress={() => setSubscriptionModalVisible(true)}
+            onPress={() => {
+              if (onNavigateSettings) {
+                onNavigateSettings();
+              } else {
+                setSubscriptionModalVisible(true);
+              }
+            }}
           >
             <Text style={styles.renewNowBtnText}>تجديد الاشتراك</Text>
           </TouchableOpacity>
@@ -589,7 +599,13 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
 
         <TouchableOpacity
           style={styles.cyclePill}
-          onPress={() => setSubscriptionModalVisible(true)}
+          onPress={() => {
+            if (onNavigateSettings) {
+              onNavigateSettings();
+            } else {
+              setSubscriptionModalVisible(true);
+            }
+          }}
         >
           <MaterialIcons
             name="calendar-today"
@@ -697,90 +713,31 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
         </View>
       </View>
 
-      {/* 3. Quick Action Buttons (admin_dashboard/code.html lines 79-114) */}
-      <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>إجراءات سريعة</Text>
-          <Text style={styles.sectionHint}>اختصارات فورية</Text>
-        </View>
-
-        <View style={styles.quickActionsGrid}>
-          <TouchableOpacity
-            style={styles.quickActionBtn}
-            onPress={() => setExpenseModalVisible(true)}
-          >
-            <View
-              style={[
-                styles.quickActionIcon,
-                { backgroundColor: COLORS.surfaceContainerHigh },
-              ]}
-            >
-              <MaterialIcons
-                name="post-add"
-                size={22}
-                color={COLORS.primary}
-              />
-            </View>
-            <Text style={styles.quickActionLabel}>إضافة مصروف</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickActionBtn}
-            onPress={() => setEmergencyModalVisible(true)}
-          >
-            <View
-              style={[
-                styles.quickActionIcon,
-                { backgroundColor: COLORS.errorContainer },
-              ]}
-            >
-              <MaterialIcons
-                name="emergency"
-                size={22}
-                color={COLORS.error}
-              />
-            </View>
-            <Text style={styles.quickActionLabel}>طوارئ جديدة</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickActionBtn}
-            onPress={handleBulkReminder}
-          >
-            <View
-              style={[
-                styles.quickActionIcon,
-                { backgroundColor: COLORS.tertiaryFixed },
-              ]}
-            >
-              <MaterialIcons
-                name="campaign"
-                size={22}
-                color={COLORS.tertiaryContainer}
-              />
-            </View>
-            <Text style={styles.quickActionLabel}>تذكير الكل</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickActionBtn}
-            onPress={() => setSubscriptionModalVisible(true)}
-          >
-            <View
-              style={[
-                styles.quickActionIcon,
-                { backgroundColor: COLORS.secondaryContainer },
-              ]}
-            >
-              <MaterialIcons
-                name="workspace-premium"
-                size={22}
-                color={COLORS.onSecondaryContainer}
-              />
-            </View>
-            <Text style={styles.quickActionLabel}>باقة التطبيق</Text>
-          </TouchableOpacity>
-        </View>
+      {/* 3. Compact Add Action Bar (Replaces bulky 4-button grid to save space) */}
+      <View style={styles.compactAddBar}>
+        <TouchableOpacity
+          style={styles.compactAddBarBtn}
+          onPress={() => setQuickActionsModalVisible(true)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.compactAddBarBadge}>
+            <MaterialIcons
+              name="keyboard-arrow-down"
+              size={18}
+              color={COLORS.primary}
+            />
+            <Text style={styles.compactAddBarBadgeText}>3 إجراءات</Text>
+          </View>
+          <View style={{ flex: 1, alignItems: 'flex-end', gap: 2 }}>
+            <Text style={styles.compactAddBarTitle}>+ إجراء سريع جديد ⚡</Text>
+            <Text style={styles.compactAddBarSub}>
+              إضافة مصروف • مطالبة طوارئ • تذكير جماعي
+            </Text>
+          </View>
+          <View style={styles.compactAddBarIconBox}>
+            <MaterialIcons name="add" size={24} color="#FFFFFF" />
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* 4. Pending Resident Join Requests + Mechanism 2: Smart Comparison Card & Change Apartment Before Approval */}
@@ -2689,7 +2646,158 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
           );
         })()}
       </BottomSheetModal>
-    </ScrollView>
+      </ScrollView>
+
+      {/* Floating Action Button (FAB) for Instant Quick Action */}
+      <TouchableOpacity
+        style={styles.floatingFab}
+        onPress={() => setQuickActionsModalVisible(true)}
+        activeOpacity={0.85}
+      >
+        <MaterialIcons name="add" size={30} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {/* ==================================================================== */}
+      {/* Modal 0: Quick Actions Sheet (إضافة مصروف • طوارئ جديدة • تذكير الكل) */}
+      {/* ==================================================================== */}
+      <BottomSheetModal
+        visible={quickActionsModalVisible}
+        title="إجراء وإضافة سريعة ⚡"
+        subtitle="اختر العملية التي ترغب في تنفيذها الآن"
+        onClose={() => setQuickActionsModalVisible(false)}
+      >
+        <View style={styles.quickActionsModalList}>
+          {/* Action 1: Add Expense */}
+          <TouchableOpacity
+            style={styles.quickActionCard}
+            onPress={() => {
+              setQuickActionsModalVisible(false);
+              setExpenseModalVisible(true);
+            }}
+          >
+            <View style={styles.quickActionCardArrow}>
+              <MaterialIcons
+                name="chevron-left"
+                size={22}
+                color={COLORS.secondary}
+              />
+            </View>
+            <View style={{ flex: 1, alignItems: 'flex-end', gap: 3 }}>
+              <View style={styles.quickActionCardTitleRow}>
+                <View style={styles.quickActionGreenBadge}>
+                  <Text style={styles.quickActionGreenBadgeText}>
+                    خصم من الخزينة
+                  </Text>
+                </View>
+                <Text style={styles.quickActionCardTitle}>
+                  إضافة مصروف جديد 💸
+                </Text>
+              </View>
+              <Text style={styles.quickActionCardDesc}>
+                تسجيل فاتورة صيانة، كهرباء، مصاعد، أو نظافة وخصمها رسمياً من رصيد
+                الخزينة مع حفظ صورة الفاتورة.
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.quickActionCardIcon,
+                { backgroundColor: 'rgba(0, 108, 73, 0.1)' },
+              ]}
+            >
+              <MaterialIcons
+                name="post-add"
+                size={26}
+                color={COLORS.secondary}
+              />
+            </View>
+          </TouchableOpacity>
+
+          {/* Action 2: New Emergency Claim */}
+          <TouchableOpacity
+            style={styles.quickActionCard}
+            onPress={() => {
+              setQuickActionsModalVisible(false);
+              setEmergencyModalVisible(true);
+            }}
+          >
+            <View style={styles.quickActionCardArrow}>
+              <MaterialIcons
+                name="chevron-left"
+                size={22}
+                color={COLORS.error}
+              />
+            </View>
+            <View style={{ flex: 1, alignItems: 'flex-end', gap: 3 }}>
+              <View style={styles.quickActionCardTitleRow}>
+                <View style={styles.quickActionRedBadge}>
+                  <Text style={styles.quickActionRedBadgeText}>عطل طارئ</Text>
+                </View>
+                <Text style={styles.quickActionCardTitle}>طوارئ جديدة 🚨</Text>
+              </View>
+              <Text style={styles.quickActionCardDesc}>
+                إطلاق مطالبة فورية لعطل مصعد أو موتور، وتقسيم المبلغ تلقائياً على
+                الشقق مع إشعار فوري لجميع السكان.
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.quickActionCardIcon,
+                { backgroundColor: 'rgba(239, 68, 68, 0.1)' },
+              ]}
+            >
+              <MaterialIcons
+                name="emergency"
+                size={26}
+                color={COLORS.error}
+              />
+            </View>
+          </TouchableOpacity>
+
+          {/* Action 3: Bulk Unpaid Reminder */}
+          <TouchableOpacity
+            style={styles.quickActionCard}
+            onPress={() => {
+              setQuickActionsModalVisible(false);
+              handleBulkReminder();
+            }}
+          >
+            <View style={styles.quickActionCardArrow}>
+              <MaterialIcons
+                name="chevron-left"
+                size={22}
+                color="#B45309"
+              />
+            </View>
+            <View style={{ flex: 1, alignItems: 'flex-end', gap: 3 }}>
+              <View style={styles.quickActionCardTitleRow}>
+                <View style={styles.quickActionAmberBadge}>
+                  <Text style={styles.quickActionAmberBadgeText}>
+                    إشعار Push فوري
+                  </Text>
+                </View>
+                <Text style={styles.quickActionCardTitle}>تذكير الكل بالسداد 🔔</Text>
+              </View>
+              <Text style={styles.quickActionCardDesc}>
+                إرسال تنبيه Push فوري بضغطة زر واحدة لكافة الشقق التي لم تسدد
+                اشتراك الشهر الحالي.
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.quickActionCardIcon,
+                { backgroundColor: 'rgba(245, 158, 11, 0.12)' },
+              ]}
+            >
+              <MaterialIcons
+                name="campaign"
+                size={26}
+                color="#B45309"
+              />
+            </View>
+          </TouchableOpacity>
+        </View>
+      </BottomSheetModal>
+    </View>
   );
 };
 
@@ -2698,9 +2806,153 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.surfaceCanvas,
   },
+  compactAddBar: {
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  compactAddBarBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+  },
+  compactAddBarIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compactAddBarTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  compactAddBarSub: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+    fontWeight: '500',
+  },
+  compactAddBarBadge: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(9, 20, 38, 0.06)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  compactAddBarBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  floatingFab: {
+    position: 'absolute',
+    bottom: 24,
+    left: 20,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#091426',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 99,
+  },
+  quickActionsModalList: {
+    gap: 12,
+    paddingBottom: 10,
+  },
+  quickActionCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 12,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  quickActionCardIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickActionCardTitleRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickActionCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  quickActionCardDesc: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+    textAlign: 'right',
+    lineHeight: 16,
+  },
+  quickActionCardArrow: {
+    padding: 4,
+  },
+  quickActionGreenBadge: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  quickActionGreenBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  quickActionRedBadge: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  quickActionRedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B91C1C',
+  },
+  quickActionAmberBadge: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  quickActionAmberBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B45309',
+  },
   scrollContent: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 80,
     gap: 18,
   },
   readOnlyBanner: {

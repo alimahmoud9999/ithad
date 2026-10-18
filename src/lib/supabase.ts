@@ -34,8 +34,8 @@ export const supabase = createClient(
 );
 
 /**
- * Ensures an active Supabase Auth session exists before calling RPCs that rely on auth.uid().
- * Automatically signs in or signs up using a deterministic phone-based email if no session exists.
+ * Ensures a Supabase Auth session exists. When a phone is supplied, the session is switched to that
+ * phone's own account (derived email/password) so two people never share one account.
  */
 export async function ensureSupabaseSession(params?: {
   phone?: string;
@@ -45,16 +45,26 @@ export async function ensureSupabaseSession(params?: {
   if (!isSupabaseConfigured) return false;
   try {
     const { data: sessionData } = await supabase.auth.getSession();
-    if (sessionData?.session?.user?.id) {
+    const currentUserId = sessionData?.session?.user?.id;
+    const currentEmail = sessionData?.session?.user?.email?.toLowerCase() || '';
+
+    const cleanPhone = (params?.phone || '').replace(/\D/g, '');
+
+    // No phone requested: keep whatever session this device already has
+    if (!cleanPhone && currentUserId) {
       return true;
     }
 
-    const cleanPhone = (params?.phone || '01000000000').replace(/\D/g, '') || '01000000000';
     const derivedEmail =
       params?.email && params.email.includes('@')
         ? params.email.trim().toLowerCase()
-        : `user.${cleanPhone}@ittihad.app`;
-    const derivedPassword = `Ittihad#${cleanPhone}#2026`;
+        : `user.${cleanPhone || '01000000000'}@ittihad.app`;
+    const derivedPassword = `Ittihad#${cleanPhone || '01000000000'}#2026`;
+
+    // Already signed in as this exact phone's account
+    if (currentUserId && currentEmail === derivedEmail) {
+      return true;
+    }
 
     const { data: signInData } = await supabase.auth.signInWithPassword({
       email: derivedEmail,
@@ -136,6 +146,7 @@ export const secureRpc = {
 
   /**
    * Resident requests to join a building using building_code and apartment_number (status = 'pending')
+   * Each phone number has its own Supabase account (switched automatically by ensureSupabaseSession).
    */
   async requestJoinBuilding(params: {
     fullName: string;
@@ -149,7 +160,8 @@ export const secureRpc = {
       phone: params.phone,
       fullName: params.fullName,
     });
-    return supabase.rpc('request_join_building', {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const rpcRes = await supabase.rpc('request_join_building', {
       p_full_name: params.fullName,
       p_phone: params.phone,
       p_building_code: params.buildingCode,
@@ -157,6 +169,13 @@ export const secureRpc = {
       p_floor_number: params.floorNumber ?? null,
       p_residency_type: params.residencyType ?? 'owner_resident',
     });
+    return {
+      data: {
+        ...(typeof rpcRes.data === 'object' && rpcRes.data ? rpcRes.data : {}),
+        user_id: sessionData?.session?.user?.id ?? null,
+      },
+      error: rpcRes.error,
+    };
   },
 
   /**
@@ -773,7 +792,94 @@ export const secureRpc = {
    * Marks all unread notifications for the current user (auth.uid()) as read
    */
   async markAllNotificationsRead() {
-    return supabase.rpc('mark_all_notifications_read');
+    return (supabase.rpc as any)('mark_all_notifications_read');
+  },
+
+  /**
+   * Community Hub: Create building issue / complaint
+   */
+  async createBuildingIssue(params: {
+    buildingId: string;
+    title: string;
+    description?: string | null;
+    category?: string;
+    severity?: string;
+    imageUrl?: string | null;
+    isPrivate?: boolean;
+    preferredTime?: string;
+    whatsappNotifications?: boolean;
+  }) {
+    return (supabase.rpc as any)('create_building_issue', {
+      p_building_id: params.buildingId,
+      p_title: params.title,
+      p_description: params.description ?? null,
+      p_category: params.category ?? 'المصعد',
+      p_severity: params.severity ?? 'medium',
+      p_image_url: params.imageUrl ?? null,
+      p_is_private: params.isPrivate ?? false,
+      p_preferred_time: params.preferredTime ?? 'any',
+      p_whatsapp_notifications: params.whatsappNotifications ?? true,
+    });
+  },
+
+  /**
+   * Community Hub: Toggle issue upvote (1 vote per apartment unit)
+   */
+  async toggleIssueUpvote(issueId: string) {
+    return (supabase.rpc as any)('toggle_issue_upvote', {
+      p_issue_id: issueId,
+    });
+  },
+
+  /**
+   * Community Hub: Update issue status (open, in_progress, resolved)
+   */
+  async updateIssueStatus(issueId: string, status: string) {
+    return (supabase.rpc as any)('update_issue_status', {
+      p_issue_id: issueId,
+      p_status: status,
+    });
+  },
+
+  /**
+   * Community Hub: Create building poll / collective decision
+   */
+  async createBuildingPoll(params: {
+    buildingId: string;
+    title: string;
+    description?: string | null;
+    category?: string;
+    estimatedCost?: number;
+    sharePerUnit?: number;
+    quorumPercent?: number;
+    durationDays?: number;
+    options?: any[];
+    documentUrl?: string | null;
+    isUrgent?: boolean;
+  }) {
+    return (supabase.rpc as any)('create_building_poll', {
+      p_building_id: params.buildingId,
+      p_title: params.title,
+      p_description: params.description ?? null,
+      p_category: params.category ?? 'عام',
+      p_estimated_cost: params.estimatedCost ?? 0,
+      p_share_per_unit: params.sharePerUnit ?? 0,
+      p_quorum_percent: params.quorumPercent ?? 51,
+      p_duration_days: params.durationDays ?? 7,
+      p_options: params.options ?? null,
+      p_document_url: params.documentUrl ?? null,
+      p_is_urgent: params.isUrgent ?? false,
+    });
+  },
+
+  /**
+   * Community Hub: Cast poll vote (1 vote per apartment unit)
+   */
+  async castPollVote(pollId: string, choice: string) {
+    return (supabase.rpc as any)('cast_poll_vote', {
+      p_poll_id: pollId,
+      p_choice: choice,
+    });
   },
 };
 

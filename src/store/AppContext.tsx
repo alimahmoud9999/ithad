@@ -13,23 +13,35 @@ import {
   AppNotification,
   AppSubscriptionInvoice,
   Building,
+  BuildingIssue,
   BuildingSubscriptionStatus,
   CashRecipientType,
   ClaimDistributionType,
   EmergencyClaim,
   Expense,
   FeaturesConfig,
+  IssueSeverity,
+  IssueStatus,
+  IssueUpvote,
   Payment,
   PaymentCategoryType,
   PaymentMethodType,
   PaymentStatusType,
   PlanTier,
+  Poll,
+  PollOption,
+  PollVote,
   SubscriptionPlan,
   UserProfile,
   UserRole,
 } from '../types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { isSupabaseConfigured, secureRpc, supabase } from '../lib/supabase';
+import {
+  ensureSupabaseSession,
+  isSupabaseConfigured,
+  secureRpc,
+  supabase,
+} from '../lib/supabase';
 import {
   dispatchPushNotification,
   registerAndSavePushTokenAsync,
@@ -388,6 +400,37 @@ interface AppContextType {
     code: PlanTier,
     updates: Partial<SubscriptionPlan>
   ) => void;
+
+  // Community Hub (Issues, Complaints, Polls & Voting)
+  buildingIssues: BuildingIssue[];
+  polls: Poll[];
+  pollVotes: PollVote[];
+  issueUpvotes: IssueUpvote[];
+  createBuildingIssue: (input: {
+    title: string;
+    description?: string;
+    category: string;
+    severity?: IssueSeverity;
+    imageUrl?: string | null;
+    isPrivate?: boolean;
+    preferredTime?: string;
+    whatsappNotifications?: boolean;
+  }) => Promise<void>;
+  toggleIssueUpvote: (issueId: string) => Promise<void>;
+  updateIssueStatus: (issueId: string, status: IssueStatus) => Promise<void>;
+  createBuildingPoll: (input: {
+    title: string;
+    description?: string;
+    category?: string;
+    estimatedCost?: number;
+    sharePerUnit?: number;
+    quorumPercent?: number;
+    durationDays?: number;
+    options?: PollOption[];
+    documentUrl?: string;
+    isUrgent?: boolean;
+  }) => Promise<void>;
+  castPollVote: (pollId: string, choice: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -418,6 +461,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     AppSubscriptionInvoice[]
   >(INITIAL_SUBSCRIPTION_INVOICES);
 
+  // Community Hub (Issues, Polls, Upvotes)
+  const [buildingIssues, setBuildingIssues] = useState<BuildingIssue[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [pollVotes, setPollVotes] = useState<PollVote[]>([]);
+  const [issueUpvotes, setIssueUpvotes] = useState<IssueUpvote[]>([]);
+
   // Push Notifications & In-App Notification State
   const [expoPushToken, setExpoPushToken] = useState<string>(
     'ExponentPushToken[ittihad-admin-001]'
@@ -438,6 +487,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     Record<string, ReviewedResidentEntry>
   >({});
   const reviewedResidentKeysRef = useRef<Record<string, ReviewedResidentEntry>>({});
+  const localPendingResidentRef = useRef<UserProfile | null>(null);
+  const lastApprovedResidentRef = useRef<UserProfile | null>(null);
 
   useEffect(() => {
     reviewedResidentKeysRef.current = reviewedResidentKeys;
@@ -457,6 +508,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })
       .catch(() => {});
+
+    AsyncStorage.getItem('@ittihad_local_pending_resident')
+      .then((val) => {
+        if (val) {
+          try {
+            const parsed = JSON.parse(val);
+            if (parsed && parsed.id) {
+              localPendingResidentRef.current = parsed;
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {});
+
+    AsyncStorage.getItem('@ittihad_approved_resident')
+      .then((val) => {
+        if (val) {
+          try {
+            const parsed = JSON.parse(val);
+            if (parsed && parsed.id) {
+              lastApprovedResidentRef.current = parsed;
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const currentUser = usersByRole[currentRole];
@@ -466,42 +543,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!isSupabaseConfigured) return;
 
     try {
-      const [bRes, aRes, oRes, pRes, cRes, eRes, nRes, uRes, sRes] =
-        await Promise.all([
-          supabase
-            .from('buildings')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('apartments')
-            .select('*')
-            .order('apartment_number', { ascending: true }),
-          supabase
-            .from('apartment_obligations')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('payments')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('emergency_claims')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('expenses')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('notifications')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase.from('users').select('*'),
-          supabase.from('subscription_plans').select('*'),
-        ]);
+      // Ensure we are signed into the active building session so RLS never hides claims, expenses, payments, or users
+      await ensureSupabaseSession();
 
-      if (bRes.data && bRes.data.length > 0) {
-        setBuildings(bRes.data as Building[]);
+      const [
+        bRes,
+        aRes,
+        oRes,
+        pRes,
+        cRes,
+        eRes,
+        nRes,
+        uRes,
+        sRes,
+        issuesRes,
+        upvotesRes,
+        pollsRes,
+        votesRes,
+      ] = await Promise.all([
+        supabase
+          .from('buildings')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('apartments')
+          .select('*')
+          .order('apartment_number', { ascending: true }),
+        supabase
+          .from('apartment_obligations')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('payments')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('emergency_claims')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('expenses')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('notifications')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase.from('users').select('*'),
+        supabase.from('subscription_plans').select('*'),
+        supabase
+          .from('building_issues')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase.from('issue_upvotes').select('*'),
+        supabase
+          .from('polls')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase.from('poll_votes').select('*'),
+      ]);
+
+      const bList = (bRes.data as Building[]) || [];
+      if (bList.length > 0) {
+        setBuildings(bList);
       }
 
       if (oRes.data) {
@@ -510,58 +614,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const rawApts = (aRes.data as Apartment[]) || [];
       const uList = (uRes.data as UserProfile[]) || [];
+      const primaryBuilding = bList[0];
 
-      if (uList.length > 0) {
+      if (uList.length > 0 || localPendingResidentRef.current || lastApprovedResidentRef.current) {
         const reviewedMap = reviewedResidentKeysRef.current || {};
 
-        // Collect all active resident phone numbers and apartment keys in uList and reviewedMap
-        const activePhones = new Set<string>();
-        const activeApts = new Set<string>();
-
-        uList.forEach((u) => {
-          if (u.status === 'active') {
-            if (u.phone) activePhones.add(u.phone.trim());
-            if (u.apartment_number) {
-              activeApts.add(`${u.building_id || ''}_${String(u.apartment_number).trim()}`);
-              activeApts.add(String(u.apartment_number).trim());
-            }
-          }
-        });
-
-        Object.values(reviewedMap).forEach((entry) => {
-          if (entry.status === 'active') {
-            if (entry.phone) activePhones.add(entry.phone.trim());
-            if (entry.apartmentNumber) {
-              if (entry.buildingId) {
-                activeApts.add(`${entry.buildingId}_${entry.apartmentNumber.trim()}`);
-              }
-              activeApts.add(entry.apartmentNumber.trim());
-            }
-          }
-        });
-
-        // Deduplicate pending residents and exclude already approved / active users
+        // Filter server pending residents, excluding any that were already reviewed by the Admin
         const rawPending = uList.filter((u) => {
           if (u.status !== 'pending') return false;
-          // Filter out archived test users
           if (u.phone?.includes('archived') || u.apartment_number?.includes('archived')) return false;
-          // Exclude if locally marked approved/active or rejected
           if (reviewedMap[u.id]) return false;
-          if (u.phone && (reviewedMap[u.phone.trim()] || activePhones.has(u.phone.trim()))) return false;
+          if (u.phone && reviewedMap[u.phone.trim()]) return false;
           if (
             u.apartment_number &&
             (reviewedMap[`${u.building_id || ''}_${String(u.apartment_number).trim()}`] ||
-              reviewedMap[String(u.apartment_number).trim()] ||
-              activeApts.has(`${u.building_id || ''}_${String(u.apartment_number).trim()}`) ||
-              activeApts.has(String(u.apartment_number).trim()))
+              reviewedMap[String(u.apartment_number).trim()])
           ) {
             return false;
           }
           return true;
         });
 
+        const combinedPending = localPendingResidentRef.current
+          ? [localPendingResidentRef.current, ...rawPending]
+          : rawPending;
+
         const seenPending = new Set<string>();
-        const uniquePending = rawPending.filter((u) => {
+        const uniquePending = combinedPending.filter((u) => {
+          if (reviewedMap[u.id]) return false;
           const key = `${(u.phone || '').trim()}_${(u.apartment_number || '').trim()}`;
           if (seenPending.has(key)) return false;
           seenPending.add(key);
@@ -569,57 +649,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         });
         setPendingResidents(uniquePending);
 
-        const adminUser = uList.find(
-          (u) => u.role === 'admin' && u.status === 'active'
-        );
+        // Resolve Admin profile for the building even if role in DB was overwritten to 'resident'
+        const rawAdminUser =
+          uList.find((u) => u.role === 'admin' && u.status === 'active') ||
+          (primaryBuilding?.admin_id
+            ? uList.find((u) => u.id === primaryBuilding.admin_id)
+            : undefined) ||
+          uList.find((u) => u.status === 'active');
 
-        // Prioritize ACTIVE residents so an active account is never overwritten by a pending one
-        const residentUser =
-          uList.find((u) => u.role === 'resident' && u.status === 'active') ||
-          uList.find(
-            (u) =>
-              u.role === 'resident' &&
-              !u.phone?.includes('archived') &&
-              !u.apartment_number?.includes('archived')
-          );
+        const adminUser: UserProfile | undefined = rawAdminUser
+          ? {
+              ...rawAdminUser,
+              role: 'admin',
+              status: 'active',
+              building_id: rawAdminUser.building_id || primaryBuilding?.id || null,
+            }
+          : undefined;
 
         if (adminUser) {
           setUsersByRole((prev) => ({ ...prev, admin: adminUser }));
         }
 
-        if (residentUser) {
+        // Resolve Resident profile:
+        // 1. If there is an active local pending join request awaiting approval, keep resident in 'pending' state
+        // 2. Otherwise if Admin already approved a resident, keep that approved resident in 'active' state
+        // 3. Otherwise if there is an unreviewed server pending resident, show it so Admin can approve it
+        // 4. Otherwise fall back to active resident in uList
+        const targetResidentUser =
+          localPendingResidentRef.current ||
+          lastApprovedResidentRef.current ||
+          uniquePending[0] ||
+          uList.find((u) => u.role === 'resident' && u.status === 'active') ||
+          uList.find((u) => u.role === 'resident');
+
+        if (targetResidentUser) {
           const aptOfResident = rawApts.find(
             (a) =>
-              (residentUser.apartment_id && a.id === residentUser.apartment_id) ||
-              (a.resident_id && a.resident_id === residentUser.id)
+              (targetResidentUser.apartment_id && a.id === targetResidentUser.apartment_id) ||
+              (targetResidentUser.apartment_number &&
+                String(a.apartment_number).trim() === String(targetResidentUser.apartment_number).trim()) ||
+              (a.resident_id && a.resident_id === targetResidentUser.id)
           );
           const resolvedAptNum =
-            residentUser.apartment_number || aptOfResident?.apartment_number || '302';
+            targetResidentUser.apartment_number || aptOfResident?.apartment_number || '55';
 
-          setUsersByRole((prev) => {
-            const isLocallyApproved =
-              prev.resident.status === 'active' ||
-              Boolean(reviewedMap[residentUser.id]?.status === 'active') ||
-              Boolean(residentUser.phone && reviewedMap[residentUser.phone.trim()]?.status === 'active') ||
-              Boolean(residentUser.apartment_number && reviewedMap[String(residentUser.apartment_number).trim()]?.status === 'active') ||
-              residentUser.status === 'active';
+          const isApprovedInMap =
+            Boolean(lastApprovedResidentRef.current) ||
+            Boolean(reviewedMap[targetResidentUser.id]?.status === 'active') ||
+            Boolean(targetResidentUser.phone && reviewedMap[targetResidentUser.phone.trim()]?.status === 'active') ||
+            Boolean(resolvedAptNum && reviewedMap[String(resolvedAptNum).trim()]?.status === 'active');
 
-            return {
-              ...prev,
-              admin: adminUser || prev.admin,
-              resident: {
-                ...prev.resident,
-                ...residentUser,
-                status: isLocallyApproved ? 'active' : residentUser.status,
-                apartment_number: resolvedAptNum,
-                floor_number:
-                  residentUser.floor_number ||
-                  aptOfResident?.floor_number ||
-                  prev.resident.floor_number ||
-                  'الدور الثالث',
-              },
-            };
-          });
+          const effectiveStatus = localPendingResidentRef.current
+            ? 'pending'
+            : isApprovedInMap
+            ? 'active'
+            : targetResidentUser.status;
+
+          setUsersByRole((prev) => ({
+            ...prev,
+            admin: adminUser || prev.admin,
+            resident: {
+              ...prev.resident,
+              ...targetResidentUser,
+              role: 'resident',
+              status: effectiveStatus,
+              building_id:
+                targetResidentUser.building_id ||
+                primaryBuilding?.id ||
+                prev.resident.building_id,
+              apartment_number: resolvedAptNum,
+              floor_number:
+                targetResidentUser.floor_number ||
+                aptOfResident?.floor_number ||
+                prev.resident.floor_number ||
+                'الدور الخامس',
+            },
+          }));
         }
       }
 
@@ -760,10 +865,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (sRes.data && sRes.data.length > 0) {
         setPlans(sRes.data as SubscriptionPlan[]);
       }
+
+      // Process Issues and Upvotes
+      const rawUpvotes = (upvotesRes?.data as IssueUpvote[]) || [];
+      setIssueUpvotes(rawUpvotes);
+
+      const rawIssues = (issuesRes?.data as BuildingIssue[]) || [];
+      const callerUser = currentRole === 'admin' ? usersByRole.admin : usersByRole.resident;
+      const callerAptNum = callerUser?.apartment_number;
+      const callerAptId = callerUser?.apartment_id;
+      const callerUserId = callerUser?.id;
+
+      const processedIssues = rawIssues.map((issue) => {
+        const hasUpvoted = rawUpvotes.some(
+          (u) =>
+            u.issue_id === issue.id &&
+            ((callerAptId && u.apartment_id === callerAptId) ||
+              (callerAptNum && u.apartment_number === callerAptNum) ||
+              (callerUserId && u.user_id === callerUserId))
+        );
+        return {
+          ...issue,
+          has_upvoted: hasUpvoted,
+        };
+      });
+      if (processedIssues.length > 0 || issuesRes?.data) {
+        setBuildingIssues((prev) => {
+          const serverIds = new Set(processedIssues.map((i) => i.id));
+          const inFlight = prev.filter((i) => i.id.startsWith('issue-') && !serverIds.has(i.id));
+          return [...inFlight, ...processedIssues];
+        });
+      }
+
+      // Process Polls and Votes
+      const rawVotes = (votesRes?.data as PollVote[]) || [];
+      setPollVotes(rawVotes);
+
+      const rawPolls = (pollsRes?.data as Poll[]) || [];
+      const totalUnits = primaryBuilding?.total_apartments || rawApts.length || 16;
+
+      const processedPolls = rawPolls.map((poll) => {
+        const pollVotesList = rawVotes.filter((v) => v.poll_id === poll.id);
+        const myVote = pollVotesList.find(
+          (v) =>
+            (callerAptId && v.apartment_id === callerAptId) ||
+            (callerAptNum && v.apartment_number === callerAptNum) ||
+            (callerUserId && v.voter_id === callerUserId)
+        );
+
+        const optionsStats: Record<string, { count: number; percentage: number; apartments: string[] }> = {};
+        const opts = poll.options || [
+          { id: 'approve', title: 'موافق على القرار' },
+          { id: 'reject', title: 'رافض أو متحفظ' },
+          { id: 'abstain', title: 'ممتنع عن التصويت' },
+        ];
+
+        opts.forEach((opt) => {
+          const matchingVotes = pollVotesList.filter((v) => v.choice === opt.id);
+          const apts = matchingVotes.map((v) => v.apartment_number).filter(Boolean);
+          const pct = pollVotesList.length > 0
+            ? Math.round((matchingVotes.length / pollVotesList.length) * 100)
+            : 0;
+          optionsStats[opt.id] = {
+            count: matchingVotes.length,
+            percentage: pct,
+            apartments: apts,
+          };
+        });
+
+        const participationPct = totalUnits > 0
+          ? Math.round((pollVotesList.length / totalUnits) * 100)
+          : 0;
+
+        return {
+          ...poll,
+          options: opts,
+          votes_count: pollVotesList.length,
+          user_voted_choice: myVote ? myVote.choice : null,
+          options_stats: optionsStats,
+          total_voted_units: pollVotesList.length,
+          total_building_units: totalUnits,
+          participation_percent: participationPct,
+        };
+      });
+
+      if (processedPolls.length > 0 || pollsRes?.data) {
+        setPolls((prev) => {
+          const serverIds = new Set(processedPolls.map((p) => p.id));
+          const inFlight = prev.filter((p) => p.id.startsWith('poll-') && !serverIds.has(p.id));
+          return [...inFlight, ...processedPolls];
+        });
+      }
     } catch (err) {
       console.warn('loadDataFromSupabase warning:', err);
     }
-  }, [payments]);
+  }, [payments, currentRole, usersByRole]);
 
   // Sync with Supabase on mount and subscribe to Realtime public schema changes
   useEffect(() => {
@@ -837,6 +1033,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'apartments' },
+        () => {
+          loadDataFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'building_issues' },
+        () => {
+          loadDataFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'issue_upvotes' },
+        () => {
+          loadDataFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'polls' },
+        () => {
+          loadDataFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'poll_votes' },
         () => {
           loadDataFromSupabase();
         }
@@ -1346,8 +1570,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         );
       }
 
+      let rpcUserId: string | null = null;
       if (isSupabaseConfigured) {
-        const { error } = await secureRpc.requestJoinBuilding({
+        const { data: rpcJoinData, error } = await secureRpc.requestJoinBuilding({
           ...input,
           buildingCode: cleanCode,
           apartmentNumber: targetAptNumber,
@@ -1359,10 +1584,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               : error.message
           );
         }
+        rpcUserId = rpcJoinData?.user_id || null;
       }
 
       const pendingUser: UserProfile = {
-        id: 'usr-res-' + Date.now(),
+        id: rpcUserId || 'usr-res-' + Date.now(),
         full_name: input.fullName.trim(),
         email: 'resident@ittihad.app',
         phone: input.phone.trim(),
@@ -1381,20 +1607,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         created_at: new Date().toISOString(),
       };
 
-      setReviewedResidentKeys((prev) => {
-        const next = { ...prev };
-        delete next[input.phone.trim()];
-        delete next[`${targetBuilding.id}_${targetAptNumber}`];
-        delete next[targetAptNumber];
-        AsyncStorage.setItem('@ittihad_reviewed_residents', JSON.stringify(next)).catch(() => {});
-        return next;
-      });
+      // Clear previous review records for this applicant so the new join request is treated as pending
+      const nextReviewed = { ...reviewedResidentKeysRef.current };
+      delete nextReviewed[pendingUser.id];
+      delete nextReviewed[input.phone.trim()];
+      delete nextReviewed[`${targetBuilding.id}_${targetAptNumber}`];
+      delete nextReviewed[targetAptNumber];
+      reviewedResidentKeysRef.current = nextReviewed;
+      setReviewedResidentKeys(nextReviewed);
+      AsyncStorage.setItem('@ittihad_reviewed_residents', JSON.stringify(nextReviewed)).catch(() => {});
+
+      localPendingResidentRef.current = pendingUser;
+      lastApprovedResidentRef.current = null;
+      AsyncStorage.setItem('@ittihad_local_pending_resident', JSON.stringify(pendingUser)).catch(() => {});
+      AsyncStorage.removeItem('@ittihad_approved_resident').catch(() => {});
 
       setPendingResidents((prev) => {
         const filtered = prev.filter(
           (p) =>
-            p.phone !== input.phone.trim() ||
-            p.apartment_number !== targetAptNumber
+            p.id !== pendingUser.id &&
+            (p.phone !== input.phone.trim() ||
+              p.apartment_number !== targetAptNumber)
         );
         return [pendingUser, ...filtered];
       });
@@ -1442,8 +1675,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setProcessingIds((prev) => ({ ...prev, [residentId]: true }));
 
       try {
-        const target = pendingResidents.find((r) => r.id === residentId);
-        if (!target || target.status !== 'pending') {
+        const target =
+          pendingResidents.find((r) => r.id === residentId) ||
+          localPendingResidentRef.current ||
+          pendingResidents[0];
+        if (!target) {
           throw new Error('تمت معالجة طلب هذا الساكن مسبقاً.');
         }
 
@@ -1459,6 +1695,99 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             a.apartment_number === finalAptNumber
         );
 
+        const newStatus = approve ? 'active' : 'rejected';
+
+        // 1. Synchronously register in reviewedResidentKeysRef and save to AsyncStorage BEFORE async RPC calls
+        const reviewRecord: ReviewedResidentEntry = {
+          status: newStatus,
+          phone: target.phone,
+          apartmentNumber: finalAptNumber,
+          fullName: target.full_name,
+          buildingId: target.building_id || currentBuilding.id,
+          reviewedAt: new Date().toISOString(),
+        };
+
+        const updatedReviewed: Record<string, ReviewedResidentEntry> = {
+          ...reviewedResidentKeysRef.current,
+          [residentId]: reviewRecord,
+          [target.id]: reviewRecord,
+          ...(target.phone ? { [target.phone.trim()]: reviewRecord } : {}),
+          ...(target.apartment_number
+            ? {
+                [`${target.building_id || currentBuilding.id}_${String(target.apartment_number).trim()}`]:
+                  reviewRecord,
+                [String(target.apartment_number).trim()]: reviewRecord,
+              }
+            : {}),
+          ...(finalAptNumber
+            ? {
+                [`${target.building_id || currentBuilding.id}_${finalAptNumber}`]:
+                  reviewRecord,
+                [finalAptNumber]: reviewRecord,
+              }
+            : {}),
+        };
+        reviewedResidentKeysRef.current = updatedReviewed;
+        setReviewedResidentKeys(updatedReviewed);
+        AsyncStorage.setItem(
+          '@ittihad_reviewed_residents',
+          JSON.stringify(updatedReviewed)
+        ).catch(() => {});
+
+        // Clear localPendingResidentRef and store lastApprovedResidentRef if approved
+        localPendingResidentRef.current = null;
+        AsyncStorage.removeItem('@ittihad_local_pending_resident').catch(() => {});
+
+        const updatedResidentProfile: UserProfile = {
+          ...usersByRole.resident,
+          ...target,
+          id: residentId,
+          role: 'resident',
+          status: newStatus,
+          full_name: target.full_name || usersByRole.resident.full_name,
+          phone: target.phone || usersByRole.resident.phone,
+          apartment_number:
+            finalAptNumber || usersByRole.resident.apartment_number,
+          apartment_id: targetAptObj?.id || usersByRole.resident.apartment_id,
+          floor_number:
+            targetAptObj?.floor_number ||
+            target.floor_number ||
+            usersByRole.resident.floor_number ||
+            'الدور الخامس',
+          building_id:
+            target.building_id || usersByRole.resident.building_id || currentBuilding.id,
+        };
+
+        if (approve) {
+          lastApprovedResidentRef.current = updatedResidentProfile;
+          AsyncStorage.setItem(
+            '@ittihad_approved_resident',
+            JSON.stringify(updatedResidentProfile)
+          ).catch(() => {});
+        } else {
+          lastApprovedResidentRef.current = null;
+          AsyncStorage.removeItem('@ittihad_approved_resident').catch(() => {});
+        }
+
+        // 2. Immediately remove from pendingResidents
+        setPendingResidents((prev) =>
+          prev.filter(
+            (r) =>
+              r.id !== residentId &&
+              r.id !== target.id &&
+              (target.phone ? r.phone?.trim() !== target.phone.trim() : true) &&
+              (finalAptNumber
+                ? String(r.apartment_number).trim() !== finalAptNumber
+                : true)
+          )
+        );
+
+        // 3. Immediately update usersByRole.resident
+        setUsersByRole((prev) => ({
+          ...prev,
+          resident: updatedResidentProfile,
+        }));
+
         if (isSupabaseConfigured) {
           try {
             await secureRpc.reviewResidentJoinRequest(
@@ -1472,67 +1801,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             console.warn('reviewResidentJoinRequest error:', rpcErr);
           }
         }
-
-        const newStatus = approve ? 'active' : 'rejected';
-
-        // 1. Permanently register in reviewedResidentKeys and save to AsyncStorage
-        const reviewRecord: ReviewedResidentEntry = {
-          status: newStatus,
-          phone: target.phone,
-          apartmentNumber: finalAptNumber,
-          fullName: target.full_name,
-          buildingId: target.building_id || currentBuilding.id,
-          reviewedAt: new Date().toISOString(),
-        };
-
-        setReviewedResidentKeys((prev) => {
-          const updated: Record<string, ReviewedResidentEntry> = {
-            ...prev,
-            [residentId]: reviewRecord,
-            ...(target.phone ? { [target.phone.trim()]: reviewRecord } : {}),
-            ...(finalAptNumber
-              ? {
-                  [`${target.building_id || currentBuilding.id}_${finalAptNumber}`]:
-                    reviewRecord,
-                  [finalAptNumber]: reviewRecord,
-                }
-              : {}),
-          };
-          AsyncStorage.setItem(
-            '@ittihad_reviewed_residents',
-            JSON.stringify(updated)
-          ).catch(() => {});
-          return updated;
-        });
-
-        // 2. Remove from pendingResidents
-        setPendingResidents((prev) =>
-          prev.filter(
-            (r) =>
-              r.id !== residentId &&
-              (target.phone ? r.phone?.trim() !== target.phone.trim() : true) &&
-              (finalAptNumber
-                ? String(r.apartment_number).trim() !== finalAptNumber
-                : true)
-          )
-        );
-
-        // 3. Immediately update usersByRole.resident
-        setUsersByRole((prev) => ({
-          ...prev,
-          resident: {
-            ...prev.resident,
-            id: residentId,
-            status: newStatus,
-            full_name: target.full_name || prev.resident.full_name,
-            phone: target.phone || prev.resident.phone,
-            apartment_number:
-              finalAptNumber || prev.resident.apartment_number,
-            apartment_id: targetAptObj?.id || prev.resident.apartment_id,
-            building_id:
-              target.building_id || prev.resident.building_id || currentBuilding.id,
-          },
-        }));
 
         if (approve && finalAptNumber) {
           setApartments((prev) => {
@@ -3137,6 +3405,352 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     []
   );
 
+  // 15. Create Building Issue / Complaint (Resident or Admin)
+  const createBuildingIssue = useCallback(
+    async (input: {
+      title: string;
+      description?: string;
+      category: string;
+      severity?: IssueSeverity;
+      imageUrl?: string | null;
+      isPrivate?: boolean;
+      preferredTime?: string;
+      whatsappNotifications?: boolean;
+    }) => {
+      const user = currentRole === 'admin' ? usersByRole.admin : usersByRole.resident;
+      const bId = currentBuilding.id || user.building_id;
+      if (!bId) {
+        throw new Error('لم يتم تحديد عقار أو عمارة سكنية بعد.');
+      }
+
+      const tempIssue: BuildingIssue = {
+        id: 'issue-' + Date.now(),
+        building_id: bId,
+        created_by: user.id,
+        apartment_id: user.apartment_id,
+        apartment_number: user.apartment_number || '1',
+        reporter_name: user.full_name || (currentRole === 'admin' ? 'رئيس الاتحاد' : 'الساكن'),
+        title: input.title.trim(),
+        description: input.description?.trim(),
+        category: input.category || 'المصعد',
+        severity: input.severity || 'medium',
+        image_url: input.imageUrl || null,
+        is_private: input.isPrivate || false,
+        upvotes_count: 0,
+        status: 'open',
+        preferred_time: input.preferredTime || 'any',
+        whatsapp_notifications: input.whatsappNotifications ?? true,
+        has_upvoted: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      setBuildingIssues((prev) => [tempIssue, ...prev]);
+
+      if (isSupabaseConfigured) {
+        try {
+          await ensureSupabaseSession();
+          const rpcRes = await secureRpc.createBuildingIssue({
+            buildingId: bId,
+            title: input.title.trim(),
+            description: input.description?.trim() || null,
+            category: input.category || 'المصعد',
+            severity: input.severity || 'medium',
+            imageUrl: input.imageUrl || null,
+            isPrivate: input.isPrivate || false,
+            preferredTime: input.preferredTime || 'any',
+            whatsappNotifications: input.whatsappNotifications ?? true,
+          });
+
+          if (!rpcRes.data && rpcRes.error) {
+            await supabase.from('building_issues').insert({
+              building_id: bId,
+              created_by: user.id,
+              apartment_id: user.apartment_id,
+              apartment_number: user.apartment_number || '1',
+              reporter_name: user.full_name || 'الساكن',
+              title: input.title.trim(),
+              description: input.description?.trim() || null,
+              category: input.category || 'المصعد',
+              severity: input.severity || 'medium',
+              image_url: input.imageUrl || null,
+              is_private: input.isPrivate || false,
+              preferred_time: input.preferredTime || 'any',
+              whatsapp_notifications: input.whatsappNotifications ?? true,
+              status: 'open',
+            });
+          }
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('createBuildingIssue cloud err:', e);
+        }
+      }
+    },
+    [currentBuilding.id, currentRole, loadDataFromSupabase, usersByRole]
+  );
+
+  // 16. Toggle Issue Upvote (صوت تأييد واحد لكل شقة)
+  const toggleIssueUpvote = useCallback(
+    async (issueId: string) => {
+      const user = currentRole === 'admin' ? usersByRole.admin : usersByRole.resident;
+      const aptNum = user.apartment_number || '1';
+      const aptId = user.apartment_id || user.id;
+
+      // Optimistic update
+      setBuildingIssues((prev) =>
+        prev.map((iss) => {
+          if (iss.id !== issueId) return iss;
+          const isNowUpvoted = !iss.has_upvoted;
+          return {
+            ...iss,
+            has_upvoted: isNowUpvoted,
+            upvotes_count: isNowUpvoted
+              ? iss.upvotes_count + 1
+              : Math.max(0, iss.upvotes_count - 1),
+          };
+        })
+      );
+
+      if (isSupabaseConfigured) {
+        try {
+          await ensureSupabaseSession();
+          const rpcRes = await secureRpc.toggleIssueUpvote(issueId);
+
+          if (!rpcRes.data && rpcRes.error) {
+            const { data: existing } = await supabase
+              .from('issue_upvotes')
+              .select('id')
+              .eq('issue_id', issueId)
+              .or(`apartment_id.eq.${aptId},user_id.eq.${user.id}`)
+              .maybeSingle();
+
+            if (existing) {
+              await supabase.from('issue_upvotes').delete().eq('id', existing.id);
+            } else {
+              await supabase.from('issue_upvotes').insert({
+                issue_id: issueId,
+                building_id: currentBuilding.id || user.building_id,
+                apartment_id: aptId,
+                apartment_number: aptNum,
+                user_id: user.id,
+              });
+            }
+          }
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('toggleIssueUpvote cloud err:', e);
+        }
+      }
+    },
+    [currentBuilding.id, currentRole, loadDataFromSupabase, usersByRole]
+  );
+
+  // 17. Update Issue Status (Admin only: open -> in_progress -> resolved)
+  const updateIssueStatus = useCallback(
+    async (issueId: string, status: IssueStatus) => {
+      setBuildingIssues((prev) =>
+        prev.map((iss) => {
+          if (iss.id !== issueId) return iss;
+          return {
+            ...iss,
+            status,
+            resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+          };
+        })
+      );
+
+      if (isSupabaseConfigured) {
+        try {
+          await ensureSupabaseSession();
+          const rpcRes = await secureRpc.updateIssueStatus(issueId, status);
+
+          if (!rpcRes.data && rpcRes.error) {
+            await supabase
+              .from('building_issues')
+              .update({
+                status,
+                resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', issueId);
+          }
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('updateIssueStatus cloud err:', e);
+        }
+      }
+    },
+    [loadDataFromSupabase]
+  );
+
+  // 18. Create Building Poll / Collective Decision (Admin only)
+  const createBuildingPoll = useCallback(
+    async (input: {
+      title: string;
+      description?: string;
+      category?: string;
+      estimatedCost?: number;
+      sharePerUnit?: number;
+      quorumPercent?: number;
+      durationDays?: number;
+      options?: PollOption[];
+      documentUrl?: string;
+      isUrgent?: boolean;
+    }) => {
+      const bId = currentBuilding.id || usersByRole.admin.building_id;
+      if (!bId) throw new Error('لم يتم تحديد عقار أو عمارة سكنية بعد.');
+
+      const opts: PollOption[] =
+        input.options && input.options.length > 0
+          ? input.options
+          : [
+              { id: 'approve', title: 'موافق على القرار المقترح' },
+              { id: 'reject', title: 'رافض أو متحفظ على البند' },
+              { id: 'abstain', title: 'ممتنع عن التصويت' },
+            ];
+
+      const endsAt = new Date();
+      endsAt.setDate(endsAt.getDate() + (input.durationDays || 7));
+
+      const tempPoll: Poll = {
+        id: 'poll-' + Date.now(),
+        building_id: bId,
+        created_by: usersByRole.admin.id,
+        session_code: '#24-DEC-' + Math.random().toString(36).substring(2, 6).toUpperCase(),
+        title: input.title.trim(),
+        description: input.description?.trim(),
+        category: input.category || 'عام',
+        estimated_cost: input.estimatedCost || 0,
+        share_per_unit: input.sharePerUnit || 0,
+        document_url: input.documentUrl,
+        quorum_percent: input.quorumPercent || 51,
+        voting_basis: 'ownership_share',
+        ends_at: endsAt.toISOString(),
+        status: 'active',
+        options: opts,
+        votes_count: 0,
+        is_urgent: input.isUrgent || false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      setPolls((prev) => [tempPoll, ...prev]);
+
+      if (isSupabaseConfigured) {
+        try {
+          await ensureSupabaseSession();
+          const rpcRes = await secureRpc.createBuildingPoll({
+            buildingId: bId,
+            title: input.title.trim(),
+            description: input.description?.trim() || null,
+            category: input.category || 'عام',
+            estimatedCost: input.estimatedCost || 0,
+            sharePerUnit: input.sharePerUnit || 0,
+            quorumPercent: input.quorumPercent || 51,
+            durationDays: input.durationDays || 7,
+            options: opts,
+            documentUrl: input.documentUrl || null,
+            isUrgent: input.isUrgent || false,
+          });
+
+          if (!rpcRes.data && rpcRes.error) {
+            await supabase.from('polls').insert({
+              building_id: bId,
+              created_by: usersByRole.admin.id,
+              session_code: tempPoll.session_code,
+              title: input.title.trim(),
+              description: input.description?.trim() || null,
+              category: input.category || 'عام',
+              estimated_cost: input.estimatedCost || 0,
+              share_per_unit: input.sharePerUnit || 0,
+              quorum_percent: input.quorumPercent || 51,
+              ends_at: endsAt.toISOString(),
+              options: opts,
+              document_url: input.documentUrl || null,
+              is_urgent: input.isUrgent || false,
+              status: 'active',
+            });
+          }
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('createBuildingPoll cloud err:', e);
+        }
+      }
+    },
+    [currentBuilding.id, loadDataFromSupabase, usersByRole.admin]
+  );
+
+  // 19. Cast Poll Vote (1 vote per apartment unit)
+  const castPollVote = useCallback(
+    async (pollId: string, choice: string) => {
+      const user = currentRole === 'admin' ? usersByRole.admin : usersByRole.resident;
+      const aptNum = user.apartment_number || '1';
+      const aptId = user.apartment_id || user.id;
+
+      const newVote: PollVote = {
+        id: 'vote-' + Date.now(),
+        poll_id: pollId,
+        building_id: currentBuilding.id || user.building_id || '',
+        apartment_id: aptId,
+        apartment_number: aptNum,
+        voter_id: user.id,
+        voter_name: user.full_name || 'الساكن',
+        choice,
+        weight_percent: 6.25,
+        created_at: new Date().toISOString(),
+      };
+
+      setPollVotes((prev) => {
+        const filtered = prev.filter(
+          (v) =>
+            !(
+              v.poll_id === pollId &&
+              (v.apartment_id === aptId || v.apartment_number === aptNum)
+            )
+        );
+        return [newVote, ...filtered];
+      });
+
+      setPolls((prev) =>
+        prev.map((p) => {
+          if (p.id !== pollId) return p;
+          const wasVoted = Boolean(p.user_voted_choice);
+          return {
+            ...p,
+            user_voted_choice: choice,
+            votes_count: wasVoted ? p.votes_count : (p.votes_count || 0) + 1,
+          };
+        })
+      );
+
+      if (isSupabaseConfigured) {
+        try {
+          await ensureSupabaseSession();
+          const rpcRes = await secureRpc.castPollVote(pollId, choice);
+
+          if (!rpcRes.data && rpcRes.error) {
+            await supabase.from('poll_votes').upsert(
+              {
+                poll_id: pollId,
+                building_id: currentBuilding.id || user.building_id,
+                apartment_id: aptId,
+                apartment_number: aptNum,
+                voter_id: user.id,
+                voter_name: user.full_name || 'الساكن',
+                choice,
+              },
+              { onConflict: 'poll_id,apartment_id' }
+            );
+          }
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('castPollVote cloud err:', e);
+        }
+      }
+    },
+    [currentBuilding.id, currentRole, loadDataFromSupabase, usersByRole]
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -3187,6 +3801,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         activateBuildingSubscription,
         superAdminConfigureBuilding,
         superAdminUpdatePlanTemplate,
+        buildingIssues,
+        polls,
+        pollVotes,
+        issueUpvotes,
+        createBuildingIssue,
+        toggleIssueUpvote,
+        updateIssueStatus,
+        createBuildingPoll,
+        castPollVote,
       }}
     >
       {children}
