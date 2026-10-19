@@ -23,6 +23,13 @@
 -- ============================================================================
 
 -- ============================================================================
+-- 0. Schema Resilience: Ensure notifications table supports role-based alerts
+-- ============================================================================
+ALTER TABLE public.notifications ALTER COLUMN recipient_id DROP NOT NULL;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS recipient_role TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
+-- ============================================================================
 -- 1. Drop Legacy Unused maintenance_tickets Table
 --    (Superseded by building_issues in 007_community_hub_issues_and_polls.sql)
 -- ============================================================================
@@ -279,7 +286,7 @@ BEGIN
 
     PERFORM set_config('app.rpc_internal_bypass', 'true', true);
 
-    -- 3. Create the building with a 60-day Pro trial
+    -- 3. Create the building with a 60-day Pro trial (admin_id linked after user row exists)
     INSERT INTO public.buildings (
         name,
         address,
@@ -292,8 +299,7 @@ BEGIN
         subscription_status,
         trial_ends_at,
         subscription_ends_at,
-        features_config,
-        admin_id
+        features_config
     ) VALUES (
         trim(p_building_name),
         trim(p_address),
@@ -306,19 +312,17 @@ BEGIN
         'trial',
         now() + INTERVAL '60 days',
         now() + INTERVAL '60 days',
-        v_pro_features,
-        v_caller_id
+        v_pro_features
     )
     RETURNING id INTO v_building_id;
 
-    -- 4. Create the admin's apartment unit
+    -- 4. Create the admin's apartment unit (resident_id linked after user row exists)
     INSERT INTO public.apartments (
         building_id,
         apartment_number,
         ownership_share_percent,
         occupant_name,
         occupant_phone,
-        resident_id,
         invite_code,
         is_active
     ) VALUES (
@@ -327,13 +331,12 @@ BEGIN
         v_share_percent,
         trim(p_full_name),
         trim(p_phone),
-        v_caller_id,
         v_building_code || '-' || trim(p_admin_apartment_number),
         true
     )
     RETURNING id INTO v_apartment_id;
 
-    -- 5. Promote user to role = 'admin' and status = 'active'
+    -- 5. Promote user to role = 'admin' and status = 'active' in public.users
     INSERT INTO public.users (
         id,
         full_name,
@@ -359,7 +362,7 @@ BEGIN
     )
     ON CONFLICT (id) DO UPDATE SET
         full_name = EXCLUDED.full_name,
-        email = COALESCE(EXCLUDED.email, users.email),
+        email = COALESCE(EXCLUDED.email, public.users.email),
         phone = EXCLUDED.phone,
         role = 'admin',
         status = 'active',
@@ -367,6 +370,10 @@ BEGIN
         apartment_id = EXCLUDED.apartment_id,
         apartment_number = EXCLUDED.apartment_number,
         ownership_share_percent = EXCLUDED.ownership_share_percent;
+
+    -- 6. Link building.admin_id and apartment.resident_id safely now that user exists
+    UPDATE public.buildings SET admin_id = v_caller_id WHERE id = v_building_id;
+    UPDATE public.apartments SET resident_id = v_caller_id WHERE id = v_apartment_id;
 
     RETURN jsonb_build_object(
         'building_id', v_building_id,

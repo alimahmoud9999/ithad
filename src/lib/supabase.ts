@@ -34,14 +34,18 @@ export const supabase = createClient(
 );
 
 /**
- * Validates that an authenticated Supabase Auth session exists.
- * Does NOT derive credentials or sign in anonymously.
+ * Validates that an authenticated Supabase Auth session exists and the user actually exists in auth.users.
+ * Clears stale or deleted sessions automatically.
  */
 export async function ensureSupabaseSession(): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    return Boolean(sessionData?.session?.user?.id);
+    const { data: userData, error } = await supabase.auth.getUser();
+    if (error || !userData?.user?.id) {
+      await supabase.auth.signOut();
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -548,5 +552,16 @@ export const secureRpc = {
       p_choice: choice,
     });
   },
+
+  /**
+   * Testing & Dev Tool: Reset building data (residents_only) or delete building completely (full_delete)
+   */
+  async resetBuildingData(buildingId: string, mode: 'residents_only' | 'full_delete') {
+    return (supabase.rpc as any)('reset_building_data', {
+      p_building_id: buildingId,
+      p_mode: mode,
+    });
+  },
 };
+
 

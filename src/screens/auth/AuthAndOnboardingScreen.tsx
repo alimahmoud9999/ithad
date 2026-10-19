@@ -107,7 +107,7 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
   const [remoteApts, setRemoteApts] = useState<Apartment[]>([]);
 
   // Robust code parser for any building/apartment invite code
-  // Handles: BLD-B627B5-12, BLD-B627B5-13, BLD-B627B5-14, BLD-B627B5, AMAL-302-JOIN
+  // Handles: BLD-612834 (building code), BLD-612834-3 (apartment invite code), AMAL-12
   const parsedCodeInfo = useMemo(() => {
     const raw = buildingCode.trim().toUpperCase();
     if (!raw) return { buildingPrefix: '', apartmentNum: '' };
@@ -116,24 +116,30 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
     let buildingPrefix = raw;
     let apartmentNum = '';
 
-    if (parts.length >= 2) {
+    if (parts[0] === 'BLD') {
+      if (parts.length >= 3) {
+        // e.g. BLD-612834-3 or BLD-612834-12
+        buildingPrefix = `${parts[0]}-${parts[1]}`;
+        apartmentNum = parts.slice(2).join('-');
+      } else {
+        // e.g. BLD-612834 (pure building code)
+        buildingPrefix = raw;
+        apartmentNum = '';
+      }
+    } else if (parts.length >= 2) {
       const lastPart = parts[parts.length - 1];
-      if (/^\d+$/.test(lastPart)) {
+      if (/^\d{1,3}$/.test(lastPart)) {
         apartmentNum = lastPart;
         buildingPrefix = parts.slice(0, parts.length - 1).join('-');
-      } else {
-        const numIdx = parts.findIndex((p) => /^\d+$/.test(p));
-        if (numIdx !== -1) {
-          apartmentNum = parts[numIdx];
-          buildingPrefix = parts.slice(0, numIdx).join('-');
-        }
       }
-    } else if (/^\d+$/.test(raw)) {
+    } else if (/^\d{1,3}$/.test(raw)) {
       apartmentNum = raw;
     }
 
     return { buildingPrefix, apartmentNum };
   }, [buildingCode]);
+
+  const [suggestedMaskedName, setSuggestedMaskedName] = useState<string | null>(null);
 
   // Reactively sync apartmentNumber whenever an explicit apartment code is typed
   useEffect(() => {
@@ -155,7 +161,11 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
           matchedApt.resident_name !== 'مشغول'
             ? matchedApt.resident_name
             : '');
-        if (occName) setFullName(occName);
+        if (occName && !occName.includes('*')) {
+          setFullName(occName);
+        } else if (occName && occName.includes('*')) {
+          setSuggestedMaskedName(occName);
+        }
         if (matchedApt.resident_phone || matchedApt.occupant_phone) {
           setPhone(matchedApt.resident_phone || matchedApt.occupant_phone || '');
         }
@@ -288,7 +298,11 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
                       : '');
 
                   setApartmentNumber(targetAptNum);
-                  if (resolvedName) setFullName(resolvedName);
+                  if (resolvedName && !resolvedName.includes('*')) {
+                    setFullName(resolvedName);
+                  } else if (resolvedName && resolvedName.includes('*')) {
+                    setSuggestedMaskedName(resolvedName);
+                  }
                   if (resolvedPhone) setPhone(resolvedPhone);
                   if (resolvedFloor) setFloorNumber(resolvedFloor);
                   setIsInviteCodeAutoMatched(true);
@@ -558,7 +572,9 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
         password: finalPassword,
         buildingCode: buildingCode.trim().toUpperCase(),
         apartmentNumber: apartmentNumber.trim(),
-        floorNumber: floorNumber.trim() || 'الدور الأول',
+        floorNumber: /^\d+$/.test(floorNumber.trim())
+          ? `الدور ${floorNumber.trim()}`
+          : floorNumber.trim() || 'الدور الأول',
       });
       setLoginIdentifier(email.trim());
       setJustSubmittedJoin(true);
@@ -1200,7 +1216,11 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
                     if (apt.floor_number) setFloorNumber(apt.floor_number);
                     const occName = apt.occupant_name || apt.resident_name;
                     if (occName && occName !== 'وحدة شاغرة' && occName !== 'مشغول') {
-                      setFullName(occName);
+                      if (!occName.includes('*')) {
+                        setFullName(occName);
+                      } else {
+                        setSuggestedMaskedName(occName);
+                      }
                     }
                   }}
                 >
@@ -1230,114 +1250,121 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
             })}
           </View>
 
-          {/* Resident Details Form */}
+          {/* Resident Details Form - All inputs stacked vertically with numeric keyboards */}
           <View style={{ marginTop: 16 }}>
-            {/* Apartment & Floor - Freely editable in case admin made a mistake */}
-            <View style={styles.twoColumnGrid}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>رقم الشقة *</Text>
-                <TextInput
-                  style={[styles.textInputField, styles.centerField, { fontWeight: '700' }]}
-                  value={apartmentNumber}
-                  onChangeText={setApartmentNumber}
-                  placeholder="12"
-                  placeholderTextColor={COLORS.outline}
-                  keyboardType="numeric"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>الدور / الطابق</Text>
-                <TextInput
-                  style={styles.textInputField}
-                  value={floorNumber}
-                  onChangeText={setFloorNumber}
-                  placeholder="مثال: الدور الثالث"
-                  placeholderTextColor={COLORS.outline}
-                />
-              </View>
+            {/* 1. Apartment Number */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.fieldLabel}>رقم الشقة *</Text>
+              <TextInput
+                style={[styles.textInputField, { fontWeight: '700' }]}
+                value={apartmentNumber}
+                onChangeText={setApartmentNumber}
+                placeholder="مثال: 3"
+                placeholderTextColor={COLORS.outline}
+                keyboardType="number-pad"
+              />
             </View>
 
-            {/* Full Name */}
-            <View style={[styles.inputGroup, { marginTop: 10 }]}>
+            {/* 2. Floor Number */}
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>رقم الدور / الطابق</Text>
+              <TextInput
+                style={styles.textInputField}
+                value={floorNumber}
+                onChangeText={setFloorNumber}
+                placeholder="مثال: 1 أو 2 أو 3"
+                placeholderTextColor={COLORS.outline}
+                keyboardType="number-pad"
+              />
+            </View>
+
+            {/* 3. Full Name */}
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
               <Text style={styles.fieldLabel}>الاسم بالكامل (ثلاثي أو رباعي) *</Text>
               <View style={styles.inputWrapper}>
                 <MaterialIcons name="person" size={20} color={COLORS.onSurfaceVariant} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInputField}
                   value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="مثال: م. أحمد مصطفى"
+                  onChangeText={(val) => {
+                    setFullName(val);
+                    if (suggestedMaskedName) setSuggestedMaskedName(null);
+                  }}
+                  placeholder="مثال: م. أحمد مصطفى أو زينهم"
                   placeholderTextColor={COLORS.outline}
                 />
+              </View>
+              {suggestedMaskedName ? (
+                <Text style={{ fontSize: 11, color: COLORS.secondary, textAlign: 'right', marginTop: 4 }}>
+                  ℹ️ مسجل مبدئياً لدى الإدارة بحرفين ({suggestedMaskedName}) - يرجى كتابة اسمك الكامل الحقيقي.
+                </Text>
+              ) : null}
+            </View>
+
+            {/* 4. Phone Number */}
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>رقم الهاتف (واتساب) *</Text>
+              <TextInput
+                style={[styles.textInputField, styles.ltrField]}
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                placeholder="010XXXXXXXX"
+                placeholderTextColor={COLORS.outline}
+              />
+            </View>
+
+            {/* 5. Email */}
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>البريد الإلكتروني (لتسجيل الدخول) *</Text>
+              <TextInput
+                style={[styles.textInputField, styles.ltrField]}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                placeholder="name@email.com"
+                placeholderTextColor={COLORS.outline}
+                autoCapitalize="none"
+              />
+            </View>
+
+            {/* 6. Password */}
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>كلمة المرور للحساب *</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={[styles.textInputField, styles.ltrField]}
+                  value={residentPassword}
+                  onChangeText={setResidentPassword}
+                  secureTextEntry={!showResidentPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor={COLORS.outline}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowResidentPassword(!showResidentPassword)}
+                  style={styles.passwordToggleBtn}
+                >
+                  <MaterialIcons
+                    name={showResidentPassword ? 'visibility-off' : 'visibility'}
+                    size={18}
+                    color={COLORS.onSurfaceVariant}
+                  />
+                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Phone & Email */}
-            <View style={[styles.twoColumnGrid, { marginTop: 10 }]}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>رقم الهاتف (واتساب) *</Text>
+            {/* 7. Confirm Password */}
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>تأكيد كلمة المرور *</Text>
+              <View style={styles.inputWrapper}>
                 <TextInput
                   style={[styles.textInputField, styles.ltrField]}
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                  placeholder="010XXXXXXXX"
+                  value={residentConfirmPassword}
+                  onChangeText={setResidentConfirmPassword}
+                  secureTextEntry={!showResidentPassword}
+                  placeholder="••••••••"
                   placeholderTextColor={COLORS.outline}
                 />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>البريد الإلكتروني (لتسجيل الدخول)</Text>
-                <TextInput
-                  style={[styles.textInputField, styles.ltrField]}
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  placeholder="name@email.com"
-                  placeholderTextColor={COLORS.outline}
-                />
-              </View>
-            </View>
-
-            {/* Password & Confirm Password (مرتين للتأكيد) */}
-            <View style={[styles.twoColumnGrid, { marginTop: 10 }]}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>كلمة المرور للحساب *</Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={[styles.textInputField, styles.ltrField]}
-                    value={residentPassword}
-                    onChangeText={setResidentPassword}
-                    secureTextEntry={!showResidentPassword}
-                    placeholder="••••••••"
-                    placeholderTextColor={COLORS.outline}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowResidentPassword(!showResidentPassword)}
-                    style={styles.passwordToggleBtn}
-                  >
-                    <MaterialIcons
-                      name={showResidentPassword ? 'visibility-off' : 'visibility'}
-                      size={18}
-                      color={COLORS.onSurfaceVariant}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>تأكيد كلمة المرور *</Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={[styles.textInputField, styles.ltrField]}
-                    value={residentConfirmPassword}
-                    onChangeText={setResidentConfirmPassword}
-                    secureTextEntry={!showResidentPassword}
-                    placeholder="••••••••"
-                    placeholderTextColor={COLORS.outline}
-                  />
-                </View>
               </View>
             </View>
 

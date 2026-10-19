@@ -193,8 +193,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onOpenAuthScreen }) => {
         </View>
       </View>
 
-      {/* Quick Role Switcher Bar (Admin / Resident / Super Admin) */}
-      {isAuthenticated && (
+      {/* Quick Role Switcher Bar (Available only for Super Admin) */}
+      {isAuthenticated && currentRole === 'super_admin' && (
         <View style={styles.roleBar}>
           <ScrollView
             horizontal
@@ -235,9 +235,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onOpenAuthScreen }) => {
         <TouchableOpacity
           activeOpacity={0.92}
           onPress={() => {
-            if (activeBannerNotification.recipient_role !== currentRole) {
-              switchRole(activeBannerNotification.recipient_role);
-            }
             dismissBannerNotification();
             setNotifModalOpen(true);
           }}

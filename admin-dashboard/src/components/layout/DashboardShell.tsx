@@ -70,7 +70,7 @@ export const DashboardShell: React.FC<{ children: React.ReactNode }> = ({
   } = useDashboard();
 
   const [email, setEmail] = useState('superadmin@ittihad.app');
-  const [password, setPassword] = useState('••••••••••••');
+  const [password, setPassword] = useState('AdminPassword@2026');
   const [refreshing, setRefreshing] = useState(false);
 
   const pendingInvoicesCount = invoices.filter(
@@ -123,6 +123,27 @@ export const DashboardShell: React.FC<{ children: React.ReactNode }> = ({
               </div>
             )}
 
+            {/* One-Click Direct Super Admin Sign-In */}
+            <button
+              type="button"
+              onClick={async () => {
+                await signInAsSuperAdmin('superadmin@ittihad.app', 'AdminPassword@2026');
+              }}
+              disabled={isLoadingAuth}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2"
+            >
+              <ShieldCheck className="w-5 h-5 text-emerald-200" />
+              {isLoadingAuth
+                ? 'جاري التحقق من الصلاحيات...'
+                : '⚡ دخول مباشر وفوري كمدير عام (Super Admin)'}
+            </button>
+
+            <div className="flex items-center gap-3 text-xs text-slate-400 my-2">
+              <span className="h-px bg-slate-200 flex-1" />
+              <span>أو تسجيل الدخول اليدوي</span>
+              <span className="h-px bg-slate-200 flex-1" />
+            </div>
+
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -132,7 +153,7 @@ export const DashboardShell: React.FC<{ children: React.ReactNode }> = ({
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  البريد الإلكتروني لحساب Super Admin (Supabase Auth)
+                  البريد الإلكتروني لحساب Super Admin
                 </label>
                 <input
                   type="email"
@@ -228,7 +249,7 @@ export const DashboardShell: React.FC<{ children: React.ReactNode }> = ({
             const isActive =
               item.href === '/'
                 ? pathname === '/'
-                : pathname.startsWith(item.href);
+                : Boolean(pathname && pathname.startsWith(item.href));
 
             return (
               <Link

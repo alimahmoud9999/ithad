@@ -211,6 +211,9 @@ const INITIAL_EXPENSES: Expense[] = [];
 const INITIAL_SUBSCRIPTION_INVOICES: AppSubscriptionInvoice[] = [];
 const INITIAL_NOTIFICATIONS: AppNotification[] = [];
 
+const isUuid = (val?: string | null): boolean =>
+  Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
 // ============================================================================
 // Context Interface
 // ============================================================================
@@ -307,6 +310,7 @@ interface AppContextType {
 
   addApartmentObligation: (input: {
     apartmentId: string;
+    apartmentNumber?: string;
     title: string;
     amount: number;
     billingMonth: string;
@@ -319,6 +323,18 @@ interface AppContextType {
     notes?: string
   ) => Promise<void>;
 
+  deleteApartmentObligation: (obligationId: string) => Promise<void>;
+  updateApartmentObligation: (
+    obligationId: string,
+    updates: {
+      title?: string;
+      amount?: number;
+      billingMonth?: string;
+      category?: PaymentCategoryType;
+      notes?: string;
+    }
+  ) => Promise<void>;
+
   submitResidentPayment: (input: {
     amount: number;
     paymentMethod: PaymentMethodType;
@@ -329,6 +345,9 @@ interface AppContextType {
     emergencyClaimId?: string;
     referenceNumber?: string;
     notes?: string;
+    obligationId?: string;
+    obligationTitle?: string;
+    isArrears?: boolean;
   }) => Promise<void>;
 
   approveResidentPayment: (paymentId: string) => Promise<void>;
@@ -382,6 +401,15 @@ interface AppContextType {
     residentName?: string;
     residentPhone?: string;
     arrearsAmount?: number;
+    stagedObligations?: Array<{
+      id?: string;
+      type: 'monthly_dues' | 'other';
+      title: string;
+      amount: number;
+      year: number;
+      month: number;
+      notes?: string;
+    }>;
   }) => Promise<{ id: string; apartmentNumber: string }>;
 
   updateApartmentUnit: (
@@ -451,6 +479,7 @@ interface AppContextType {
     isUrgent?: boolean;
   }) => Promise<void>;
   castPollVote: (pollId: string, choice: string) => Promise<void>;
+  resetBuildingData: (mode: 'residents_only' | 'full_delete') => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -661,9 +690,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           };
         });
         setApartmentObligations((prev) => {
+          // Identify any obligations currently targeted by in-flight or pending payments
+          const pendingTargetOblIds = new Set(
+            payments
+              .filter((p) => p.status === 'pending' && Boolean(p.notes))
+              .map((p) => p.notes?.match(/#([a-zA-Z0-9_-]+)\]/)?.[1])
+              .filter(Boolean)
+          );
+
           const serverIds = new Set(enrichedObligations.map((o) => o.id));
           const localInFlight = prev.filter((o) => !serverIds.has(o.id));
-          return [...localInFlight, ...enrichedObligations];
+
+          // Retain pending status if an obligation has a pending payment
+          const normalizedServer = enrichedObligations.map((o) => {
+            const localMatch = prev.find((lo) => lo.id === o.id);
+            if ((pendingTargetOblIds.has(o.id) || localMatch?.status === 'pending') && o.status === 'unpaid') {
+              return { ...o, status: 'pending' as const };
+            }
+            return o;
+          });
+
+          return [...localInFlight, ...normalizedServer];
         });
       }
       const uList = (uRes.data as UserProfile[]) || [];
@@ -723,6 +770,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           setUsersByRole((prev) => ({ ...prev, admin: adminUser }));
         }
 
+        // Check if the pending resident was approved on the server (e.g. from Web Admin or another client)
+        if (localPendingResidentRef.current) {
+          const pendingId = localPendingResidentRef.current.id;
+          const pendingPhone = localPendingResidentRef.current.phone?.trim();
+          const pendingApt = localPendingResidentRef.current.apartment_number
+            ? String(localPendingResidentRef.current.apartment_number).trim()
+            : null;
+
+          const serverApprovedUser = uList.find(
+            (u) =>
+              u.status === 'active' &&
+              ((pendingId && u.id === pendingId) ||
+                (pendingPhone && u.phone && u.phone.trim() === pendingPhone) ||
+                (pendingApt &&
+                  u.apartment_number &&
+                  String(u.apartment_number).trim() === pendingApt))
+          );
+
+          if (serverApprovedUser) {
+            localPendingResidentRef.current = null;
+            lastApprovedResidentRef.current = serverApprovedUser;
+            AsyncStorage.removeItem('@ittihad_local_pending_resident').catch(() => {});
+            AsyncStorage.setItem(
+              '@ittihad_approved_resident',
+              JSON.stringify(serverApprovedUser)
+            ).catch(() => {});
+          }
+        }
+
+        // Also check if current Supabase Auth user is an active resident
+        const { data: sessionData } = await supabase.auth.getSession();
+        const activeAuthUid = sessionData?.session?.user?.id;
+        if (activeAuthUid) {
+          const myUserInDb = uList.find((u) => u.id === activeAuthUid);
+          if (myUserInDb && myUserInDb.status === 'active') {
+            localPendingResidentRef.current = null;
+            lastApprovedResidentRef.current = myUserInDb;
+            AsyncStorage.removeItem('@ittihad_local_pending_resident').catch(() => {});
+          }
+        }
+
         // Resolve Resident profile:
         // 1. If there is an active local pending join request awaiting approval, keep resident in 'pending' state
         // 2. Otherwise if Admin already approved a resident, keep that approved resident in 'active' state
@@ -731,6 +819,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         const targetResidentUser =
           localPendingResidentRef.current ||
           lastApprovedResidentRef.current ||
+          (activeAuthUid ? uList.find((u) => u.id === activeAuthUid) : undefined) ||
           uniquePending[0] ||
           uList.find((u) => u.role === 'resident' && u.status === 'active') ||
           uList.find((u) => u.role === 'resident');
@@ -810,12 +899,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (serverPayments.length > 0) {
         setPayments((prev) => {
           const serverIds = new Set(serverPayments.map((p) => p.id));
+          const localApprovedIds = new Set(
+            prev.filter((p) => p.status === 'paid').map((p) => p.id)
+          );
+
           const localInFlight = prev.filter((p) => {
             if (serverIds.has(p.id)) return false;
             if (!p.id.startsWith('pay-')) return false;
 
-            // Discard local in-flight item if the server already contains a matching payment for that apartment and category
+            // Discard local in-flight item ONLY if the server already contains an identical payment
             const isSettledOnServer = serverPayments.some((sp) => {
+              if (sp.id === p.id) return true;
               const sameApt =
                 (sp.apartment_number && p.apartment_number && String(sp.apartment_number).trim() === String(p.apartment_number).trim()) ||
                 (sp.resident_id && p.resident_id && sp.resident_id === p.resident_id);
@@ -824,12 +918,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               if (p.payment_category === 'emergency_claim') {
                 return sp.emergency_claim_id === p.emergency_claim_id;
               }
-              return sp.billing_month === p.billing_month;
+              // If paying a specific obligation, match ONLY if server payment references the exact same obligation
+              if (p.notes?.includes('[سداد بند:')) {
+                const pObl = p.notes.match(/#([a-zA-Z0-9_-]+)\]/)?.[1];
+                return Boolean(pObl && sp.notes?.includes(pObl));
+              }
+              // If arrears payment, match only if server payment is also arrears with exact amount
+              if (p.notes?.includes('مديونية')) {
+                return Boolean(sp.notes?.includes('مديونية')) && sp.amount === p.amount;
+              }
+              // Regular monthly dues
+              return (
+                sp.billing_month === p.billing_month &&
+                !sp.notes?.includes('[سداد بند:') &&
+                !sp.notes?.includes('مديونية')
+              );
             });
 
             return !isSettledOnServer;
           });
-          return [...localInFlight, ...serverPayments];
+
+          // Prevent server payments from reverting locally approved payments back to pending
+          const normalizedServerPayments = serverPayments.map((sp) => {
+            if (localApprovedIds.has(sp.id) && sp.status === 'pending') {
+              return { ...sp, status: 'paid' as const };
+            }
+            return sp;
+          });
+
+          return [...localInFlight, ...normalizedServerPayments];
         });
       }
 
@@ -912,12 +1029,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             (sum, o) => sum + (Number(o.amount) || 0),
             0
           );
-          const effectiveArrears = Math.max(Number(apt.arrears_amount) || 0, totalOblsDebt);
+          const dbArrears = Number(apt.arrears_amount) || 0;
+          const effectiveArrears = dbArrears > 0 && totalOblsDebt > 0
+            ? Math.min(dbArrears, totalOblsDebt)
+            : Math.max(dbArrears, totalOblsDebt);
           const hasUnpaidDebt = effectiveArrears > 0;
 
           const baseStatus: PaymentStatusType = monthlyPayment
             ? monthlyPayment.status
-            : (matchedUser?.role === 'admin' ? 'paid' : 'unpaid');
+            : 'unpaid';
 
           const finalStatus: PaymentStatusType =
             baseStatus === 'pending'
@@ -940,9 +1060,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
         setApartments((prev) => {
           const serverIds = new Set(merged.map((a) => a.id));
-          const localInFlight = prev.filter(
-            (a) => !serverIds.has(a.id) && a.id.startsWith('apt-')
+          const serverAptKeys = new Set(
+            merged.map(
+              (a) =>
+                `${a.building_id || ''}_${String(a.apartment_number).trim()}`
+            )
           );
+          const localInFlight = prev.filter((a) => {
+            if (serverIds.has(a.id)) return false;
+            if (!a.id.startsWith('apt-')) return false;
+            const aptKey = `${a.building_id || ''}_${String(
+              a.apartment_number
+            ).trim()}`;
+            return !serverAptKeys.has(aptKey);
+          });
           return [...localInFlight, ...merged];
         });
       }
@@ -1061,7 +1192,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           loadDataFromSupabase();
           if (payload.eventType === 'INSERT' && payload.new) {
             const notif = payload.new as AppNotification;
-            setActiveBannerNotification(notif);
+            const notifTitle = notif.title || '';
+
+            // 1. Explicit Admin-Only Notifications
+            const isAdminNotif =
+              notif.recipient_role === 'admin' ||
+              notifTitle.includes('إيصال سداد جديد') ||
+              notifTitle.includes('طلب انضمام ساكن جديد') ||
+              (usersByRole.admin.id && notif.recipient_id === usersByRole.admin.id && notif.recipient_role !== 'resident');
+
+            // 2. Explicit Resident-Only Notifications
+            const isResidentNotif =
+              notif.recipient_role === 'resident' ||
+              notifTitle.includes('تم اعتماد سداد') ||
+              notifTitle.includes('تعذر اعتماد') ||
+              notifTitle.includes('تم قبول انضمامك') ||
+              notifTitle.includes('تم تفعيل حسابك') ||
+              notifTitle.includes('مديونية جديدة') ||
+              notifTitle.includes('تذكير بسداد') ||
+              notifTitle.includes('تم تسجيل سدادك النقدي') ||
+              (usersByRole.resident.id && notif.recipient_id === usersByRole.resident.id && notif.recipient_role !== 'admin');
+
+            if (currentRole === 'admin') {
+              if (isAdminNotif && !isResidentNotif) {
+                setActiveBannerNotification(notif);
+              }
+            } else if (currentRole === 'resident') {
+              if (isResidentNotif && !isAdminNotif) {
+                const targetApt = notif.metadata?.apartment_number;
+                const myApt = currentUser.apartment_number || usersByRole.resident.apartment_number;
+                const isForMyUnit =
+                  !targetApt ||
+                  !myApt ||
+                  String(targetApt).trim() === String(myApt).trim();
+
+                if (isForMyUnit) {
+                  setActiveBannerNotification(notif);
+                }
+              }
+            }
           }
         }
       )
@@ -1072,7 +1241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           loadDataFromSupabase();
           if (payload.eventType === 'INSERT' && payload.new) {
             const newUser = payload.new as UserProfile;
-            if (newUser.status === 'pending') {
+            if (newUser.status === 'pending' && currentRole === 'admin') {
               setActiveBannerNotification({
                 id: 'notif-join-' + Date.now(),
                 building_id: newUser.building_id || '',
@@ -1087,6 +1256,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
                 created_at: new Date().toISOString(),
               });
             }
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            const updatedUser = payload.new as UserProfile;
+            if (updatedUser.status === 'active' && currentRole === 'resident') {
+              localPendingResidentRef.current = null;
+              lastApprovedResidentRef.current = updatedUser;
+              AsyncStorage.removeItem('@ittihad_local_pending_resident').catch(() => {});
+              AsyncStorage.setItem(
+                '@ittihad_approved_resident',
+                JSON.stringify(updatedUser)
+              ).catch(() => {});
+              setUsersByRole((prev) => ({
+                ...prev,
+                resident: {
+                  ...prev.resident,
+                  ...updatedUser,
+                  status: 'active',
+                },
+              }));
+              setActiveBannerNotification({
+                id: 'notif-approved-' + Date.now(),
+                building_id: updatedUser.building_id || '',
+                recipient_id: updatedUser.id,
+                recipient_role: 'resident',
+                title: 'تم اعتماد حسابك بنجاح 🎉',
+                body: `مرحباً بك! وافق رئيس الاتحاد على انضمامك لشقة (${updatedUser.apartment_number}). يمكنك الآن استخدام التطبيق بالكامل.`,
+                category: 'general',
+                badge_label: 'حساب مفعل',
+                is_urgent: false,
+                is_read: false,
+                created_at: new Date().toISOString(),
+              });
+            }
           }
         }
       )
@@ -1097,7 +1298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           loadDataFromSupabase();
           if (payload.eventType === 'INSERT' && payload.new) {
             const p = payload.new as any;
-            if (p.status === 'pending') {
+            if (p.status === 'pending' && currentRole === 'admin') {
               setActiveBannerNotification({
                 id: 'notif-pay-' + Date.now(),
                 building_id: p.building_id || '',
@@ -1120,6 +1321,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         { event: '*', schema: 'public', table: 'apartments' },
         () => {
           loadDataFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'apartment_obligations' },
+        (payload) => {
+          loadDataFromSupabase();
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const newObl = payload.new as any;
+            const myAptId = usersByRole.resident.apartment_id;
+            const myAptNum = usersByRole.resident.apartment_number;
+            const isForMyApt =
+              (myAptId && newObl.apartment_id === myAptId) ||
+              (myAptNum && newObl.apartment_number && String(newObl.apartment_number).trim() === String(myAptNum).trim()) ||
+              (apartments.find((a) => a.id === newObl.apartment_id)?.apartment_number === myAptNum);
+
+            if (currentRole === 'resident' && isForMyApt) {
+              setActiveBannerNotification({
+                id: 'notif-obl-' + Date.now(),
+                building_id: newObl.building_id || '',
+                recipient_id: usersByRole.resident.id,
+                recipient_role: 'resident',
+                title: `مديونية جديدة مسجلة على شقتك (${myAptNum || ''}) 📋`,
+                body: `تم قيد مديونية جديدة: (${newObl.title}) بمبلغ ${Number(newObl.amount || 0).toLocaleString()} ج.م عن دورة ${newObl.billing_month || ''}.`,
+                category: 'financial',
+                badge_label: 'مديونية مستحقة',
+                is_urgent: true,
+                is_read: false,
+                created_at: new Date().toISOString(),
+              });
+            }
+          }
         }
       )
       .on(
@@ -1260,6 +1493,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             building_id:
               params.buildingId ?? currentUser.building_id ?? 'bld-amal-001',
             recipient_id: params.recipientId || null,
+            recipient_role: params.recipientRole,
             title: params.title,
             body: params.body,
             category: params.category,
@@ -1272,24 +1506,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           });
       }
 
-      // Only trigger in-app banner and local OS notification on this device IF current user is the actual recipient
-      const isCurrentUserRecipient =
-        params.recipientId === currentUser.id ||
-        (Boolean(params.metadata?.apartment_number) &&
-          Boolean(currentUser.apartment_number) &&
-          String(params.metadata?.apartment_number).trim() ===
-            String(currentUser.apartment_number).trim()) ||
-        (Array.isArray(params.metadata?.target_apartments) &&
-          Boolean(currentUser.apartment_number) &&
-          params.metadata.target_apartments
-            .map((a: any) => String(a).trim())
-            .includes(String(currentUser.apartment_number).trim())) ||
-        (!params.recipientId &&
-          !params.metadata?.apartment_number &&
-          params.recipientRole === currentRole);
+      // STRICT ROLE ISOLATION: A notification for Admin must NEVER show on a Resident screen, and vice-versa!
+      let isCurrentUserRecipient = false;
+      if (params.recipientRole === currentRole) {
 
-      if (isCurrentUserRecipient) {
-        setActiveBannerNotification(newNotif);
+        if (currentRole === 'admin') {
+          // Admin sees notifications directed to admin
+          isCurrentUserRecipient = true;
+        } else if (currentRole === 'resident') {
+          // Resident sees only if recipientId matches, or target apartment strictly matches their unit
+          isCurrentUserRecipient =
+            params.recipientId === currentUser.id ||
+            (!params.recipientId &&
+              Boolean(params.metadata?.apartment_number) &&
+              Boolean(currentUser.apartment_number) &&
+              String(params.metadata?.apartment_number).trim() ===
+                String(currentUser.apartment_number).trim()) ||
+            (!params.recipientId &&
+              Array.isArray(params.metadata?.target_apartments) &&
+              Boolean(currentUser.apartment_number) &&
+              params.metadata.target_apartments
+                .map((a: any) => String(a).trim())
+                .includes(String(currentUser.apartment_number).trim()));
+        }
+
+        if (isCurrentUserRecipient) {
+          setActiveBannerNotification(newNotif);
+        }
       }
 
       await dispatchPushNotification({
@@ -1340,6 +1583,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (currentRole === 'resident') {
         const effectiveResidentApt = currentUser.apartment_number || '';
+
+        // STRICT SECURITY: A notification intended for Admin must NEVER be visible in Resident's notifications list
+        if (
+          n.recipient_role === 'admin' ||
+          n.title.includes('إيصال سداد جديد') ||
+          n.title.includes('طلب انضمام ساكن جديد')
+        ) {
+          return false;
+        }
 
         // Direct recipient by user ID
         if (n.recipient_id && n.recipient_id === currentUser.id) {
@@ -1538,13 +1790,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       let rpcBuildingCode: string | null = null;
       let rpcBuildingId: string | null = null;
       if (isSupabaseConfigured) {
-        const hasSession = await ensureSupabaseSession();
-        if (!hasSession && input.email && input.password) {
-          await authSignUp(input.email, input.password, {
-            fullName: input.fullName,
-            phone: input.phone,
-            role: 'admin',
-          });
+        const { data: sessionData } = await supabase.auth.getSession();
+        const currentSessionEmail = sessionData?.session?.user?.email?.trim().toLowerCase();
+        const targetEmail = input.email?.trim().toLowerCase();
+
+        // If target email is provided and differs from active session or if previous session is stale, sign out
+        if (targetEmail && input.password) {
+          if (currentSessionEmail && currentSessionEmail !== targetEmail) {
+            await supabase.auth.signOut();
+          }
+
+          const hasSession = await ensureSupabaseSession();
+          if (!hasSession) {
+            try {
+              await authSignUp(targetEmail, input.password, {
+                fullName: input.fullName,
+                phone: input.phone,
+                role: 'admin',
+              });
+            } catch (signUpErr: any) {
+              if (
+                signUpErr?.message?.toLowerCase().includes('already registered') ||
+                signUpErr?.message?.includes('مسجل بالفعل')
+              ) {
+                try {
+                  await authSignIn(targetEmail, input.password);
+                } catch {}
+              } else {
+                throw signUpErr;
+              }
+            }
+          }
         }
         const { data, error } = await secureRpc.createBuildingForAdmin(input);
         if (error) {
@@ -1591,8 +1867,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         created_at: new Date().toISOString(),
       };
 
-      setBuildings((prev) => [newBuilding, ...prev]);
-
       const adminApt: Apartment = {
         id: 'apt-' + Date.now(),
         building_id: newBuildingId,
@@ -1610,13 +1884,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         occupant_phone: input.phone.trim(),
         resident_id: usersByRole.admin.id,
         invite_code: `${generatedCode}-${input.adminApartmentNumber.trim()}`,
-        payment_status: 'paid',
+        payment_status: 'unpaid',
         arrears_amount: 0,
-        unpaid_amount: 0,
-        unpaid_months_count: 0,
+        unpaid_amount: input.defaultMonthlyDues || 300,
+        unpaid_months_count: 1,
         is_active: true,
       };
-      setApartments((prev) => [adminApt, ...prev.filter((a) => a.building_id === newBuildingId)]);
+
+      // Completely clear any old building residue in local memory
+      setBuildings([newBuilding]);
+      setApartments([adminApt]);
+      setApartmentObligations([]);
+      setPayments([]);
+      setExpenses([]);
+      setEmergencyClaims([]);
+      setPendingResidents([]);
+      setBuildingIssues([]);
+      setPolls([]);
+      setPollVotes([]);
+      setIssueUpvotes([]);
+
+      // Clear local storage caches of old resident review state
+      localPendingResidentRef.current = null;
+      lastApprovedResidentRef.current = null;
+      reviewedResidentKeysRef.current = {};
+      setReviewedResidentKeys({});
+      AsyncStorage.multiRemove([
+        '@ittihad_reviewed_residents',
+        '@ittihad_local_pending_resident',
+        '@ittihad_approved_resident',
+      ]).catch(() => {});
 
       setUsersByRole((prev) => ({
         ...prev,
@@ -1659,58 +1956,110 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
+      let rpcUserId: string | null = null;
+      let rpcBuildingId: string | null = null;
+      let rpcBuildingName: string | null = null;
+
+      if (isSupabaseConfigured) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const currentSessionEmail = sessionData?.session?.user?.email?.trim().toLowerCase();
+        const targetEmail = input.email?.trim().toLowerCase();
+
+        // If target email is provided and differs from active session (e.g. admin logged in on this device), sign out previous user
+        if (targetEmail && input.password) {
+          if (currentSessionEmail && currentSessionEmail !== targetEmail) {
+            await supabase.auth.signOut();
+          }
+
+          const hasSession = await ensureSupabaseSession();
+          if (!hasSession) {
+            try {
+              await authSignUp(targetEmail, input.password, {
+                fullName: input.fullName,
+                phone: input.phone,
+                role: 'resident',
+              });
+            } catch (signUpErr: any) {
+              if (
+                signUpErr?.message?.toLowerCase().includes('already registered') ||
+                signUpErr?.message?.includes('مسجل بالفعل')
+              ) {
+                try {
+                  await authSignIn(targetEmail, input.password);
+                } catch {}
+              } else {
+                throw signUpErr;
+              }
+            }
+          }
+        }
+
+        const { data: rpcJoinData, error } = await secureRpc.requestJoinBuilding({
+          ...input,
+          buildingCode: cleanCode,
+          apartmentNumber: targetAptNumber,
+        });
+
+        if (error) {
+          if (error.message.includes('User is already an active member of an existing building')) {
+            throw new Error(
+              'هذا الحساب مسجل بالفعل كعضو نشط في العمارة. إذا كنت تسجل ساكناً أو مالكاً جديداً، يرجى كتابة بريد إلكتروني وكلمة مرور جديدة خاصة بالساكن (أو تسجيل الخروج أولاً من حساب رئيس الاتحاد).'
+            );
+          }
+          throw new Error(error.message);
+        }
+
+        rpcUserId = rpcJoinData?.user_id || null;
+        rpcBuildingId = rpcJoinData?.building_id || null;
+        rpcBuildingName = rpcJoinData?.building_name || null;
+      }
+
       let targetBuilding = buildings.find(
-        (b) => b.building_code.trim().toUpperCase() === cleanCode
+        (b) =>
+          b.building_code.trim().toUpperCase() === cleanCode ||
+          (rpcBuildingId && b.id === rpcBuildingId)
       );
 
-      // If not yet present in local memory, check Supabase directly
+      // If not yet present in local memory, check Supabase directly or fallback
       if (!targetBuilding && isSupabaseConfigured) {
         try {
           const { data } = await supabase
             .from('buildings')
             .select('*')
-            .ilike('building_code', cleanCode)
+            .or(`building_code.ilike.${cleanCode}${rpcBuildingId ? `,id.eq.${rpcBuildingId}` : ''}`)
             .maybeSingle();
           if (data) {
             targetBuilding = data as Building;
             setBuildings((prev) => [data as Building, ...prev]);
-          } else {
-            const { data: rpcData } = await supabase.rpc(
-              'lookup_building_apartments_for_join',
-              { p_building_code: cleanCode }
-            );
-            if (rpcData && rpcData.building_id) {
-              const fallbackBld: Building = {
-                id: rpcData.building_id,
-                name: rpcData.building_name || 'عمارة سكنية',
-                address: rpcData.building_name || 'القاهرة',
-                city: 'القاهرة',
-                building_code: rpcData.building_code || cleanCode,
-                admin_id: '',
-                fund_balance: 0,
-                default_monthly_dues: 350,
-                total_apartments: rpcData.apartments?.length || 16,
-                plan_code: 'pro',
-                subscription_status: 'trial',
-                trial_ends_at: new Date(Date.now() + 60 * 86400000).toISOString(),
-                subscription_ends_at: new Date(
-                  Date.now() + 60 * 86400000
-                ).toISOString(),
-                custom_monthly_price: null,
-                max_apartments_override: null,
-                features_config: {
-                  receipt_upload: true,
-                  emergency_claims: true,
-                  export_reports: true,
-                  voting: true,
-                  maintenance_tickets: true,
-                  documents_archive: true,
-                },
-                created_at: new Date().toISOString(),
-              };
-              targetBuilding = fallbackBld;
-              setBuildings((prev) => [fallbackBld, ...prev]);
-            }
+          } else if (rpcBuildingId) {
+            const fallbackBld: Building = {
+              id: rpcBuildingId,
+              name: rpcBuildingName || 'عمارة سكنية',
+              address: 'القاهرة',
+              city: 'القاهرة',
+              building_code: cleanCode,
+              admin_id: '',
+              fund_balance: 0,
+              default_monthly_dues: 350,
+              total_apartments: 16,
+              plan_code: 'pro',
+              subscription_status: 'trial',
+              trial_ends_at: new Date(Date.now() + 60 * 86400000).toISOString(),
+              subscription_ends_at: new Date(Date.now() + 60 * 86400000).toISOString(),
+              custom_monthly_price: null,
+              max_apartments_override: null,
+              features_config: {
+                receipt_upload: true,
+                emergency_claims: true,
+                export_reports: true,
+                voting: true,
+                maintenance_tickets: true,
+                documents_archive: true,
+              },
+              created_at: new Date().toISOString(),
+            };
+            targetBuilding = fallbackBld;
+            setBuildings((prev) => [fallbackBld, ...prev]);
           }
         } catch {}
       }
@@ -1719,27 +2068,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         throw new Error(
           `كود المبنى (${input.buildingCode}) غير صحيح أو غير مسجل في قاعدة البيانات. يرجى الحصول على الكود الصحيح من رئيس الاتحاد.`
         );
-      }
-
-      let rpcUserId: string | null = null;
-      if (isSupabaseConfigured) {
-        const hasSession = await ensureSupabaseSession();
-        if (!hasSession && input.email && input.password) {
-          await authSignUp(input.email, input.password, {
-            fullName: input.fullName,
-            phone: input.phone,
-            role: 'resident',
-          });
-        }
-        const { data: rpcJoinData, error } = await secureRpc.requestJoinBuilding({
-          ...input,
-          buildingCode: cleanCode,
-          apartmentNumber: targetAptNumber,
-        });
-        if (error) {
-          throw new Error(error.message);
-        }
-        rpcUserId = rpcJoinData?.user_id || null;
       }
 
       const pendingUser: UserProfile = {
@@ -1973,8 +2301,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
                       resident_id: target.id,
                       resident_name: target.full_name,
                       resident_phone: target.phone,
-                      occupant_name: a.occupant_name || target.full_name,
-                      occupant_phone: a.occupant_phone || target.phone,
+                      occupant_name: target.full_name || a.occupant_name,
+                      occupant_phone: target.phone || a.occupant_phone,
                     }
                   : a
               );
@@ -2222,14 +2550,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       billingMonth: string;
       category?: PaymentCategoryType;
       notes?: string;
+      apartmentNumber?: string;
     }) => {
       if (!isCurrentBuildingWritable) {
         throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
       }
 
-      const targetApt = apartments.find(
-        (a) => a.id === input.apartmentId || a.apartment_number === input.apartmentId
+      let targetApt = apartments.find(
+        (a) =>
+          a.id === input.apartmentId ||
+          (input.apartmentNumber && a.apartment_number === input.apartmentNumber) ||
+          a.apartment_number === input.apartmentId
       );
+
+      if (!targetApt && isSupabaseConfigured && currentBuilding.id) {
+        try {
+          const isValidUuid = (val: string) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+          let query = supabase.from('apartments').select('*').eq('building_id', currentBuilding.id);
+          if (isValidUuid(input.apartmentId)) {
+            query = query.eq('id', input.apartmentId);
+          } else if (input.apartmentNumber) {
+            query = query.eq('apartment_number', input.apartmentNumber.trim());
+          } else if (!input.apartmentId.startsWith('apt-')) {
+            query = query.eq('apartment_number', input.apartmentId.trim());
+          }
+          const { data: dbApts } = await query.order('created_at', { ascending: false }).limit(1);
+          const dbApt = dbApts && dbApts.length > 0 ? dbApts[0] : null;
+          if (dbApt) {
+            targetApt = {
+              id: dbApt.id,
+              building_id: dbApt.building_id,
+              apartment_number: dbApt.apartment_number,
+              floor_number: dbApt.floor_number || 'الدور الأول',
+              wing_or_direction: dbApt.wing_or_direction || 'واجهة',
+              area_sqm: Number(dbApt.area_sqm) || 160,
+              ownership_share_percent: Number(dbApt.ownership_share_percent) || 6.25,
+              monthly_dues_override: dbApt.monthly_dues_override,
+              occupant_name: dbApt.occupant_name,
+              occupant_phone: dbApt.occupant_phone,
+              resident_id: dbApt.resident_id,
+              resident_name: dbApt.occupant_name,
+              resident_phone: dbApt.occupant_phone,
+              payment_status: 'unpaid',
+              arrears_amount: Number(dbApt.arrears_amount) || 0,
+              unpaid_amount: Number(dbApt.arrears_amount) || 0,
+              unpaid_months_count: 1,
+              invite_code: dbApt.invite_code,
+              is_active: dbApt.is_active ?? true,
+            };
+          }
+        } catch (e) {
+          console.warn('Fallback lookup error in addApartmentObligation:', e);
+        }
+      }
+
       if (!targetApt) {
         throw new Error('الشقة المحددة غير موجودة.');
       }
@@ -2282,7 +2658,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           }
 
           if (isValidUuid(targetDbApartmentId)) {
-            const { data: insertedObl } = await supabase
+            let insertRes = await supabase
               .from('apartment_obligations')
               .insert({
                 building_id: currentBuilding.id || targetApt.building_id,
@@ -2298,9 +2674,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               .select('id')
               .maybeSingle();
 
-            if (insertedObl?.id) {
+            // If 'other' was rejected by postgres because migration 016 was not run yet, retry with 'monthly_dues'
+            if (insertRes.error && insertRes.error.message?.toLowerCase().includes('payment_category_type')) {
+              insertRes = await supabase
+                .from('apartment_obligations')
+                .insert({
+                  building_id: currentBuilding.id || targetApt.building_id,
+                  apartment_id: targetDbApartmentId,
+                  title: input.title.trim(),
+                  category: 'monthly_dues',
+                  billing_month: input.billingMonth.trim(),
+                  amount: input.amount,
+                  status: 'unpaid',
+                  notes: input.notes?.trim() || null,
+                  created_by: usersByRole.admin.id && isValidUuid(usersByRole.admin.id) ? usersByRole.admin.id : null,
+                })
+                .select('id')
+                .maybeSingle();
+            }
+
+            if (insertRes.data?.id) {
               setApartmentObligations((prev) =>
-                prev.map((o) => (o.id === newObligation.id ? { ...o, id: insertedObl.id } : o))
+                prev.map((o) => (o.id === newObligation.id ? { ...o, id: insertRes.data!.id } : o))
               );
             }
 
@@ -2311,6 +2706,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
                 arrears_amount: (targetApt.arrears_amount || 0) + input.amount,
               })
               .eq('id', targetDbApartmentId);
+
+            // Send instant notification to the resident of this apartment
+            try {
+              const { data: resUsers } = await supabase
+                .from('users')
+                .select('id')
+                .eq('building_id', currentBuilding.id || targetApt.building_id)
+                .eq('apartment_number', targetApt.apartment_number)
+                .limit(1);
+
+              const targetResidentId = resUsers?.[0]?.id || targetApt.resident_id;
+
+              await supabase.from('notifications').insert({
+                building_id: currentBuilding.id || targetApt.building_id,
+                recipient_id: targetResidentId && isValidUuid(targetResidentId) ? targetResidentId : null,
+                recipient_role: 'resident',
+                title: `مديونية جديدة مسجلة (شقة ${targetApt.apartment_number}) 📋`,
+                body: `قام رئيس الاتحاد بتسجيل مديونية جديدة: (${input.title}) بمبلغ ${input.amount.toLocaleString()} ج.م عن شهر ${input.billingMonth}.`,
+                category: 'financial',
+                badge_label: 'مديونية مستحقة',
+                is_urgent: true,
+                metadata: {
+                  apartment_number: targetApt.apartment_number,
+                  apartment_id: targetDbApartmentId,
+                  amount: input.amount,
+                  title: input.title,
+                  billing_month: input.billingMonth,
+                },
+              });
+            } catch (notifErr) {
+              console.warn('Failed to insert obligation notification:', notifErr);
+            }
+
+            await loadDataFromSupabase();
           }
         } catch (e) {
           console.warn('Supabase addApartmentObligation error:', e);
@@ -2402,7 +2831,207 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     [apartmentObligations, apartments, isCurrentBuildingWritable]
   );
 
-  // 4. Scenario 1B: Resident submits payment (monthly dues or emergency claim) ➔ Immediate Push Notification to Admin!
+  // Delete an apartment obligation (from log or if added by mistake)
+  const deleteApartmentObligation = useCallback(
+    async (obligationId: string) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+
+      const targetObl = apartmentObligations.find((o) => o.id === obligationId);
+      if (!targetObl) {
+        throw new Error('الالتزام أو المديونية غير موجودة.');
+      }
+
+      // 1. Remove from local state
+      setApartmentObligations((prev) => prev.filter((o) => o.id !== obligationId));
+
+      // 2. Re-calculate apartment's debt and status in memory
+      setApartments((prev) =>
+        prev.map((apt) => {
+          if (apt.id === targetObl.apartment_id || apt.apartment_number === targetObl.apartment_number) {
+            const remainingObls = apartmentObligations.filter(
+              (o) =>
+                o.id !== obligationId &&
+                ((o.apartment_id && o.apartment_id === apt.id) ||
+                  (o.apartment_number && o.apartment_number === apt.apartment_number)) &&
+                o.status === 'unpaid'
+            );
+            const newDebt = remainingObls.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+            return {
+              ...apt,
+              arrears_amount: newDebt,
+              unpaid_amount:
+                newDebt +
+                (apt.payment_status === 'paid' && newDebt === 0
+                  ? 0
+                  : currentBuilding?.default_monthly_dues || 400),
+              unpaid_months_count: remainingObls.filter((o) => o.category === 'monthly_dues').length,
+              payment_status: newDebt > 0 ? 'unpaid' : apt.payment_status,
+            };
+          }
+          return apt;
+        })
+      );
+
+      // 3. Remove from Supabase
+      if (isSupabaseConfigured) {
+        try {
+          const isValidUuid = (val: string) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+          if (isValidUuid(obligationId)) {
+            await supabase.from('apartment_obligations').delete().eq('id', obligationId);
+          }
+
+          if (isValidUuid(targetObl.apartment_id)) {
+            const { data: dbRemaining } = await supabase
+              .from('apartment_obligations')
+              .select('amount')
+              .eq('apartment_id', targetObl.apartment_id)
+              .eq('status', 'unpaid');
+            const totalRemaining = (dbRemaining || []).reduce(
+              (sum: number, r: any) => sum + (Number(r.amount) || 0),
+              0
+            );
+            await supabase
+              .from('apartments')
+              .update({
+                arrears_amount: totalRemaining,
+              })
+              .eq('id', targetObl.apartment_id);
+          }
+
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('Supabase deleteApartmentObligation error:', e);
+        }
+      }
+    },
+    [apartmentObligations, currentBuilding?.default_monthly_dues, isCurrentBuildingWritable]
+  );
+
+  // Update an existing apartment obligation (amount, title, month, notes)
+  const updateApartmentObligation = useCallback(
+    async (
+      obligationId: string,
+      updates: {
+        title?: string;
+        amount?: number;
+        billingMonth?: string;
+        category?: PaymentCategoryType;
+        notes?: string;
+      }
+    ) => {
+      if (!isCurrentBuildingWritable) {
+        throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+
+      const targetObl = apartmentObligations.find((o) => o.id === obligationId);
+      if (!targetObl) {
+        throw new Error('الالتزام أو المديونية غير موجودة.');
+      }
+
+      // 1. Update in local state
+      const updatedObl: ApartmentObligation = {
+        ...targetObl,
+        title: updates.title !== undefined ? updates.title.trim() : targetObl.title,
+        amount: updates.amount !== undefined ? updates.amount : targetObl.amount,
+        billing_month:
+          updates.billingMonth !== undefined ? updates.billingMonth.trim() : targetObl.billing_month,
+        category: updates.category !== undefined ? updates.category : targetObl.category,
+        notes: updates.notes !== undefined ? updates.notes.trim() : targetObl.notes,
+      };
+
+      setApartmentObligations((prev) =>
+        prev.map((o) => (o.id === obligationId ? updatedObl : o))
+      );
+
+      // 2. Re-calculate apartment's debt in memory
+      setApartments((prev) =>
+        prev.map((apt) => {
+          if (apt.id === targetObl.apartment_id || apt.apartment_number === targetObl.apartment_number) {
+            const nextObls = apartmentObligations.map((o) => (o.id === obligationId ? updatedObl : o));
+            const aptUnpaidObls = nextObls.filter(
+              (o) =>
+                ((o.apartment_id && o.apartment_id === apt.id) ||
+                  (o.apartment_number && o.apartment_number === apt.apartment_number)) &&
+                o.status === 'unpaid'
+            );
+            const newDebt = aptUnpaidObls.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+            return {
+              ...apt,
+              arrears_amount: newDebt,
+              unpaid_amount:
+                newDebt +
+                (apt.payment_status === 'paid' && newDebt === 0
+                  ? 0
+                  : currentBuilding?.default_monthly_dues || 400),
+              unpaid_months_count: aptUnpaidObls.filter((o) => o.category === 'monthly_dues').length,
+            };
+          }
+          return apt;
+        })
+      );
+
+      // 3. Update in Supabase
+      if (isSupabaseConfigured) {
+        try {
+          const isValidUuid = (val: string) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+          if (isValidUuid(obligationId)) {
+            const updatePayload: Record<string, any> = {};
+            if (updates.title !== undefined) updatePayload.title = updates.title.trim();
+            if (updates.amount !== undefined) updatePayload.amount = updates.amount;
+            if (updates.billingMonth !== undefined) updatePayload.billing_month = updates.billingMonth.trim();
+            if (updates.category !== undefined) updatePayload.category = updates.category;
+            if (updates.notes !== undefined) updatePayload.notes = updates.notes.trim();
+
+            if (Object.keys(updatePayload).length > 0) {
+              const { error: upErr } = await supabase
+                .from('apartment_obligations')
+                .update(updatePayload)
+                .eq('id', obligationId);
+
+              if (upErr && upErr.message?.toLowerCase().includes('payment_category_type')) {
+                updatePayload.category = 'monthly_dues';
+                await supabase
+                  .from('apartment_obligations')
+                  .update(updatePayload)
+                  .eq('id', obligationId);
+              }
+            }
+          }
+
+          if (isValidUuid(targetObl.apartment_id) && updates.amount !== undefined) {
+            const { data: dbRemaining } = await supabase
+              .from('apartment_obligations')
+              .select('amount')
+              .eq('apartment_id', targetObl.apartment_id)
+              .eq('status', 'unpaid');
+            const totalRemaining = (dbRemaining || []).reduce(
+              (sum: number, r: any) => sum + (Number(r.amount) || 0),
+              0
+            );
+            await supabase
+              .from('apartments')
+              .update({
+                arrears_amount: totalRemaining,
+              })
+              .eq('id', targetObl.apartment_id);
+          }
+
+          await loadDataFromSupabase();
+        } catch (e) {
+          console.warn('Supabase updateApartmentObligation error:', e);
+        }
+      }
+    },
+    [apartmentObligations, currentBuilding?.default_monthly_dues, isCurrentBuildingWritable]
+  );
+
+  // 4. Scenario 1B: Resident submits payment (monthly dues, emergency claim, or arrears/obligation) ➔ Immediate Push Notification to Admin!
   const submitResidentPayment = useCallback(
     async (input: {
       amount: number;
@@ -2414,6 +3043,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       emergencyClaimId?: string;
       referenceNumber?: string;
       notes?: string;
+      obligationId?: string;
+      obligationTitle?: string;
+      isArrears?: boolean;
     }) => {
       if (
         input.paymentMethod === 'electronic_transfer' &&
@@ -2426,35 +3058,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const resident = usersByRole.resident;
       const effectiveResidentApt = resident.apartment_number || currentUser.apartment_number || '-';
-      let serverPaymentId: string | null = null;
-      if (isSupabaseConfigured) {
-        try {
-          const rpcRes = await secureRpc.submitResidentPayment({
-            amount: input.amount,
-            paymentMethod: input.paymentMethod,
-            billingMonth: input.billingMonth,
-            cashRecipient: input.cashRecipient,
-            receiptImageUrl: input.receiptImageUrl,
-            paymentCategory: input.paymentCategory,
-            emergencyClaimId: input.emergencyClaimId,
-            referenceNumber: input.referenceNumber,
-            notes: input.notes,
-          });
-          if (rpcRes?.data?.payment_id) {
-            serverPaymentId = String(rpcRes.data.payment_id);
-          }
-        } catch (rpcErr) {
-          console.warn('submitResidentPayment RPC error:', rpcErr);
-          throw rpcErr;
-        }
-      }
-
       const category = input.paymentCategory || 'monthly_dues';
 
-      // Idempotency & Duplicate Check
+      // 1. Normalize billing month (YYYY-MM)
+      let normalizedMonth = (input.billingMonth || '').trim();
+      if (/^(0[1-9]|1[0-2])-([0-9]{4})$/.test(normalizedMonth)) {
+        const [mm, yyyy] = normalizedMonth.split('-');
+        normalizedMonth = `${yyyy}-${mm}`;
+      } else if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(normalizedMonth)) {
+        normalizedMonth = new Date().toISOString().slice(0, 7);
+      }
+
+      // 2. Pre-flight Idempotency & Duplicate Check
       const existingPayment = payments.find((p) => {
         if (p.building_id !== currentBuilding.id) return false;
-        if (p.payment_category !== category) return false;
         if (p.status !== 'pending' && p.status !== 'paid') return false;
 
         const isSameApartment =
@@ -2467,15 +3084,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
         if (!isSameApartment) return false;
 
-        if (category === 'emergency_claim') {
+        if (input.obligationId) {
+          // If paying a specific obligation, block only if this specific obligation is already pending or paid
+          return p.notes
+            ? p.notes.includes(input.obligationId) ||
+                (Boolean(input.obligationTitle) && p.notes.includes(input.obligationTitle!))
+            : false;
+        } else if (input.isArrears) {
+          // If paying arrears / partial, only block if there is a pending arrears payment with the exact same amount
           return (
+            p.status === 'pending' &&
+            Boolean(p.notes && p.notes.includes('مديونية')) &&
+            p.amount === input.amount
+          );
+        } else if (category === 'emergency_claim') {
+          return (
+            p.payment_category === 'emergency_claim' &&
             Boolean(input.emergencyClaimId) &&
             p.emergency_claim_id === input.emergencyClaimId
           );
         } else {
           return (
-            Boolean(input.billingMonth) &&
-            p.billing_month === input.billingMonth
+            p.payment_category === 'monthly_dues' &&
+            Boolean(normalizedMonth) &&
+            p.billing_month === normalizedMonth &&
+            (!p.notes || (!p.notes.includes('مديونية') && !p.notes.includes('[سداد بند:')))
           );
         }
       });
@@ -2483,12 +3116,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (existingPayment) {
         if (existingPayment.status === 'paid') {
           throw new Error(
-            'تم سداد هذا الاشتراك مسبقاً ومعتمد في سجلات الخزينة.'
+            'تم سداد هذا الالتزام مسبقاً ومعتمد في سجلات الخزينة.'
           );
         } else {
           throw new Error(
-            'لديك طلب سداد قيد المراجعة بالفعل لهذا الشهر/المطالبة. يرجى انتظار اعتماد رئيس الاتحاد.'
+            'لديك طلب سداد قيد المراجعة بالفعل لهذا البند/الشهر. يرجى انتظار اعتماد رئيس الاتحاد.'
           );
+        }
+      }
+
+      // 3. Supabase RPC Submission with Fallback
+      let serverPaymentId: string | null = null;
+      if (isSupabaseConfigured) {
+        try {
+          const rpcRes = await secureRpc.submitResidentPayment({
+            amount: input.amount,
+            paymentMethod: input.paymentMethod,
+            billingMonth: normalizedMonth,
+            cashRecipient: input.cashRecipient,
+            receiptImageUrl: input.receiptImageUrl,
+            paymentCategory: category === 'other' ? 'monthly_dues' : category,
+            emergencyClaimId: input.emergencyClaimId,
+            referenceNumber: input.referenceNumber,
+            notes: input.notes,
+          });
+          if (rpcRes?.data?.payment_id) {
+            serverPaymentId = String(rpcRes.data.payment_id);
+          }
+        } catch (rpcErr: any) {
+          console.warn('submitResidentPayment RPC error:', rpcErr);
+          // If RPC rejected due to legacy month duplicate constraint (e.g. migration 017 not yet run),
+          // fallback to direct insert so obligation payments proceed seamlessly
+          if (
+            (rpcErr?.message?.includes('لا يمكن تكرار المعاملة') || rpcErr?.message?.includes('duplicate')) &&
+            input.obligationId
+          ) {
+            try {
+              const { data: directPay, error: directErr } = await supabase
+                .from('payments')
+                .insert({
+                  building_id: currentBuilding.id,
+                  apartment_id: resident.apartment_id,
+                  apartment_number: effectiveResidentApt,
+                  resident_id: resident.id,
+                  resident_name: resident.full_name || 'الساكن / المالك',
+                  payment_category: category === 'other' ? 'monthly_dues' : category,
+                  billing_month: normalizedMonth,
+                  amount: input.amount,
+                  payment_method: input.paymentMethod,
+                  cash_recipient: input.cashRecipient || null,
+                  receipt_image_url: input.receiptImageUrl || null,
+                  reference_number: input.referenceNumber || '#IP-' + Math.floor(10000 + Math.random() * 90000),
+                  notes: input.notes,
+                  status: 'pending',
+                })
+                .select('id')
+                .maybeSingle();
+
+              if (directPay?.id) {
+                serverPaymentId = directPay.id;
+              } else if (directErr) {
+                console.warn('Direct fallback insert payments error:', directErr);
+              }
+            } catch (fallbackErr) {
+              console.warn('Fallback payments insert error:', fallbackErr);
+            }
+          } else {
+            throw rpcErr;
+          }
         }
       }
 
@@ -2502,7 +3197,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         resident_name: resident.full_name || 'الساكن / المالك',
         payment_category: category,
         emergency_claim_id: input.emergencyClaimId || null,
-        billing_month: input.billingMonth,
+        billing_month: normalizedMonth,
         amount: input.amount,
         payment_method: input.paymentMethod,
         cash_recipient: input.cashRecipient || null,
@@ -2521,8 +3216,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setPayments((prev) => [newPayment, ...prev]);
 
-      // Update apartment status to pending review
-      if (category === 'monthly_dues') {
+      // If paying a specific obligation, immediately mark it as 'pending' so it blurs and awaits admin review
+      if (input.obligationId) {
+        setApartmentObligations((prev) =>
+          prev.map((o) =>
+            o.id === input.obligationId ? { ...o, status: 'pending' as const } : o
+          )
+        );
+        if (isSupabaseConfigured && isUuid(input.obligationId)) {
+          supabase
+            .from('apartment_obligations')
+            .update({ status: 'pending' })
+            .eq('id', input.obligationId)
+            .then(() => {});
+        }
+      }
+
+      // Update apartment status to pending review if regular monthly dues
+      if (category === 'monthly_dues' && !input.isArrears && !input.obligationId) {
         setApartments((prev) =>
           prev.map((apt) =>
             apt.apartment_number === effectiveResidentApt
@@ -2532,11 +3243,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         );
       }
 
-      // Scenario 1B: Send immediate notification to Admin about new receipt / payment
-      const paymentTypeAr =
-        category === 'emergency_claim'
-          ? 'مساهمة مطالبة صيانة طارئة'
-          : `اشتراك شهر (${input.billingMonth})`;
+      // Notification details
+      let paymentTypeAr = '';
+      if (input.obligationId) {
+        paymentTypeAr = `سداد بند (${input.obligationTitle || 'التزام محدد'})`;
+      } else if (input.isArrears) {
+        paymentTypeAr = `سداد مديونية / متأخرات (${input.amount.toLocaleString()} ج.م)`;
+      } else if (category === 'emergency_claim') {
+        paymentTypeAr = 'مساهمة مطالبة صيانة طارئة';
+      } else {
+        paymentTypeAr = `اشتراك شهر (${normalizedMonth})`;
+      }
+
       const methodAr =
         input.paymentMethod === 'electronic_transfer'
           ? 'تحويل إلكتروني مرفق بصورة الإيصال'
@@ -2548,20 +3266,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         recipientPushToken: usersByRole.admin.push_token,
         buildingId: currentBuilding.id,
         title: `إيصال سداد جديد — شقة ${effectiveResidentApt} 💳`,
-        body: `قام (${resident.full_name || 'الساكن'}) برفع طلب سداد ${paymentTypeAr} بقيمة ${input.amount.toLocaleString()} ج.م عبر (${methodAr}) بانتظار مراجعتك.`,
+        body: `قام (${resident.full_name || 'الساكن'}) برفع طلب ${paymentTypeAr} بقيمة ${input.amount.toLocaleString()} ج.م عبر (${methodAr}) بانتظار مراجعتك.`,
         category: 'financial',
         badgeLabel:
-          category === 'emergency_claim' ? 'سداد طوارئ جديد' : 'إيصال للمراجعة',
+          category === 'emergency_claim'
+            ? 'سداد طوارئ جديد'
+            : input.isArrears || input.obligationId
+            ? 'سداد مديونية'
+            : 'إيصال للمراجعة',
         isUrgent: category === 'emergency_claim',
         metadata: {
           apartment_number: effectiveResidentApt,
           amount: input.amount,
           payment_id: newPayment.id,
           category,
+          obligation_id: input.obligationId,
         },
       });
     },
     [
+      currentUser.apartment_number,
       currentBuilding,
       payments,
       pushAndRecordNotification,
@@ -2597,17 +3321,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setProcessingIds((prev) => ({ ...prev, [paymentId]: true }));
 
       try {
-        const isValidUuid =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            paymentId
-          );
+        const isUuid = (val?: string | null) =>
+          Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
-        if (isSupabaseConfigured && isValidUuid) {
+        if (isSupabaseConfigured && isUuid(paymentId)) {
           try {
             await secureRpc.approveResidentPayment(paymentId);
-          } catch (rpcErr) {
+          } catch (rpcErr: any) {
             console.warn('approveResidentPayment RPC warning:', rpcErr);
-            throw rpcErr;
+            // If the RPC threw because of column mismatch (e.g. payment_status on apartments), fallback to direct updates
+            if (rpcErr?.message?.includes('payment_status') || rpcErr?.message?.includes('column')) {
+              try {
+                await supabase
+                  .from('payments')
+                  .update({
+                    status: 'paid',
+                    reviewed_by: usersByRole.admin.id,
+                    reviewed_at: new Date().toISOString(),
+                  })
+                  .eq('id', paymentId);
+
+                await supabase
+                  .from('buildings')
+                  .update({
+                    fund_balance: currentBuilding.fund_balance + targetPayment.amount,
+                  })
+                  .eq('id', targetPayment.building_id);
+              } catch (fallbackErr) {
+                console.warn('Fallback direct approve error:', fallbackErr);
+              }
+            } else {
+              throw rpcErr;
+            }
           }
         }
 
@@ -2638,7 +3383,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               ) {
                 return { ...p, status: 'paid' };
               }
-              if (p.billing_month === targetPayment.billing_month) {
+              if (p.billing_month === targetPayment.billing_month && !p.notes?.includes('مديونية')) {
                 return { ...p, status: 'paid' };
               }
             }
@@ -2674,34 +3419,196 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             })
           );
         } else {
-          setApartments((prev) =>
-            prev.map((apt) =>
-              (apt.apartment_number === effectiveAptNum || apt.id === targetPayment.apartment_id) &&
-              apt.building_id === targetPayment.building_id
-                ? {
-                    ...apt,
-                    payment_status: 'paid',
-                    unpaid_months_count: 0,
-                    unpaid_amount: 0,
-                  }
-                : apt
-            )
+          // Check if this payment targets an obligation or arrears
+          const notesStr = targetPayment.notes || '';
+          const matchOblId = notesStr.match(/#([a-zA-Z0-9_-]+)\]/)?.[1];
+          const isArrears = notesStr.includes('مديونية') || Boolean(matchOblId);
+
+          let updatedObligations = [...apartmentObligations];
+
+          const aptTarget = apartments.find(
+            (a) =>
+              (a.apartment_number === effectiveAptNum || a.id === targetPayment.apartment_id) &&
+              a.building_id === targetPayment.building_id
           );
+
+          if (aptTarget) {
+            // Find all unpaid or pending obligations for this apartment
+            const aptUnpaidObls = updatedObligations.filter(
+              (o) =>
+                ((o.apartment_id && o.apartment_id === aptTarget.id) ||
+                  (o.apartment_number &&
+                    String(o.apartment_number).trim() === String(aptTarget.apartment_number).trim())) &&
+                (o.status === 'unpaid' || o.status === 'pending')
+            );
+
+            let remainingPay = targetPayment.amount;
+            const fullyPaidObligationIds: string[] = [];
+            const partiallyUpdatedObligations: { id: string; newAmount: number; notes: string }[] = [];
+
+            if (matchOblId) {
+              // Option A: Specific obligation payment
+              const matchedObl = aptUnpaidObls.find((o) => o.id === matchOblId);
+              if (matchedObl) {
+                if (remainingPay >= matchedObl.amount) {
+                  fullyPaidObligationIds.push(matchedObl.id);
+                  remainingPay -= matchedObl.amount;
+                } else {
+                  const newAmount = Math.max(0, matchedObl.amount - remainingPay);
+                  const newNotes = (matchedObl.notes ? matchedObl.notes + ' • ' : '') + `[سداد جزئي: تم خصم ${remainingPay} ج.م - متبقي ${newAmount} ج.م]`;
+                  partiallyUpdatedObligations.push({ id: matchedObl.id, newAmount, notes: newNotes });
+                  remainingPay = 0;
+                }
+              }
+            } else if (isArrears || targetPayment.payment_category === 'monthly_dues') {
+              // Option B: General arrears or partial payment - settle FIFO on unpaid/pending obligations
+              const eligibleObls = aptUnpaidObls.filter((o) => o.status === 'unpaid' || o.status === 'pending');
+              for (const obl of eligibleObls) {
+                if (remainingPay <= 0) break;
+                if (remainingPay >= obl.amount) {
+                  fullyPaidObligationIds.push(obl.id);
+                  remainingPay -= obl.amount;
+                } else {
+                  const newAmount = Math.max(0, obl.amount - remainingPay);
+                  const newNotes = (obl.notes ? obl.notes + ' • ' : '') + `[سداد جزئي: تم خصم ${remainingPay} ج.م - متبقي ${newAmount} ج.م]`;
+                  partiallyUpdatedObligations.push({ id: obl.id, newAmount, notes: newNotes });
+                  remainingPay = 0;
+                  break;
+                }
+              }
+            }
+
+            if (fullyPaidObligationIds.length > 0 || partiallyUpdatedObligations.length > 0) {
+              updatedObligations = updatedObligations.map((o) => {
+                if (fullyPaidObligationIds.includes(o.id)) {
+                  return { ...o, status: 'paid' as const };
+                }
+                const partial = partiallyUpdatedObligations.find((p) => p.id === o.id);
+                if (partial) {
+                  return { ...o, amount: partial.newAmount, notes: partial.notes, status: 'unpaid' as const };
+                }
+                return o;
+              });
+              setApartmentObligations(updatedObligations);
+
+              // Update in Supabase
+              if (isSupabaseConfigured) {
+                for (const oblId of fullyPaidObligationIds) {
+                  if (isUuid(oblId)) {
+                    supabase
+                      .from('apartment_obligations')
+                      .update({ status: 'paid' })
+                      .eq('id', oblId)
+                      .then(() => {});
+                  }
+                }
+                for (const partial of partiallyUpdatedObligations) {
+                  if (isUuid(partial.id)) {
+                    supabase
+                      .from('apartment_obligations')
+                      .update({ amount: partial.newAmount, notes: partial.notes, status: 'unpaid' })
+                      .eq('id', partial.id)
+                      .then(() => {});
+                  }
+                }
+              }
+            }
+
+            // Recalculate remaining unpaid obligations and arrears
+            const remainingAptUnpaid = updatedObligations.filter(
+              (o) =>
+                ((o.apartment_id && o.apartment_id === aptTarget.id) ||
+                  (o.apartment_number &&
+                    String(o.apartment_number).trim() === String(aptTarget.apartment_number).trim())) &&
+                (o.status === 'unpaid' || o.status === 'pending')
+            );
+
+            const remainingOblsDebt = remainingAptUnpaid.reduce(
+              (sum, o) => sum + (Number(o.amount) || 0),
+              0
+            );
+
+            // Compute new arrears amount
+            const oldArrears = Number(aptTarget.arrears_amount) || 0;
+            const newArrears = Math.max(0, oldArrears - targetPayment.amount);
+            const finalArrears = remainingAptUnpaid.length > 0 ? remainingOblsDebt : newArrears;
+            const hasRemainingDebt = finalArrears > 0;
+            const monthlyDueAmount = currentBuilding.default_monthly_dues || 400;
+            const isMonthlyPaid = !isArrears && targetPayment.payment_category === 'monthly_dues' ? true : (aptTarget.payment_status === 'paid' && !hasRemainingDebt);
+            const totalUnpaidWithMonthly = finalArrears + (isMonthlyPaid ? 0 : monthlyDueAmount);
+
+            setApartments((prev) =>
+              prev.map((apt) =>
+                apt.id === aptTarget.id
+                  ? {
+                      ...apt,
+                      arrears_amount: finalArrears,
+                      unpaid_months_count: remainingAptUnpaid.filter((o) => o.category === 'monthly_dues').length,
+                      unpaid_amount: totalUnpaidWithMonthly,
+                      payment_status: hasRemainingDebt ? 'unpaid' : (isMonthlyPaid ? 'paid' : 'unpaid'),
+                    }
+                  : apt
+              )
+            );
+
+            // Update apartment arrears in Supabase
+            if (isSupabaseConfigured && isUuid(aptTarget.id)) {
+              supabase
+                .from('apartments')
+                .update({ arrears_amount: finalArrears })
+                .eq('id', aptTarget.id)
+                .then(() => {});
+            }
+          } else {
+            setApartments((prev) =>
+              prev.map((apt) =>
+                (apt.apartment_number === effectiveAptNum || apt.id === targetPayment.apartment_id) &&
+                apt.building_id === targetPayment.building_id
+                  ? {
+                      ...apt,
+                      payment_status: 'paid',
+                      unpaid_months_count: 0,
+                      unpaid_amount: 0,
+                    }
+                  : apt
+              )
+            );
+          }
         }
 
         // Scenario 2A: Send immediate notification to Resident on approval
+        const notesStr = targetPayment.notes || '';
+        const matchOblId = notesStr.match(/#([a-zA-Z0-9_-]+)\]/)?.[1];
+        const matchOblTitle = notesStr.match(/\[سداد بند:\s*(.*?)\s*#/)?.[1];
+        const isArrears = notesStr.includes('مديونية') || Boolean(matchOblId);
+
         const paymentDesc =
           targetPayment.payment_category === 'emergency_claim'
             ? 'مساهمة الصيانة الطارئة'
             : `اشتراك شهر (${targetPayment.billing_month})`;
+
+        let notifTitle = `تم اعتماد سدادك بنجاح (شقة ${effectiveAptNum || 'المبنى'}) ✅`;
+        let notifBody = `اعتمد رئيس الاتحاد دفعتك بقيمة ${targetPayment.amount.toLocaleString()} ج.م عن ${paymentDesc} وتمت إضافتها رسمياً لرصيد خزينة العمارة.`;
+
+        if (matchOblId) {
+          const oblTitle =
+            matchOblTitle ||
+            apartmentObligations.find((o) => o.id === matchOblId)?.title ||
+            'البند المحدد';
+          notifTitle = `تم اعتماد سداد البند (${oblTitle}) بنجاح ✅`;
+          notifBody = `اعتمد رئيس الاتحاد سداد بند (${oblTitle}) بقيمة ${targetPayment.amount.toLocaleString()} ج.م وتمت تسويته وإلغاء مديونيته من شقتك.`;
+        } else if (isArrears) {
+          notifTitle = `تم اعتماد سداد المديونية بنجاح (شقة ${effectiveAptNum || 'المبنى'}) ✅`;
+          notifBody = `اعتمد رئيس الاتحاد سداد مبلغ ${targetPayment.amount.toLocaleString()} ج.م من مديونية شقتك وتم تحديث سجل التزاماتك بنجاح.`;
+        }
 
         await pushAndRecordNotification({
           recipientId: targetPayment.resident_id || usersByRole.resident.id,
           recipientRole: 'resident',
           recipientPushToken: usersByRole.resident.push_token,
           buildingId: targetPayment.building_id,
-          title: `تم اعتماد سدادك بنجاح (شقة ${effectiveAptNum || 'المبنى'}) ✅`,
-          body: `اعتمد رئيس الاتحاد دفعتك بقيمة ${targetPayment.amount.toLocaleString()} ج.م عن ${paymentDesc} وتمت إضافتها رسمياً لرصيد خزينة العمارة.`,
+          title: notifTitle,
+          body: notifBody,
           category: 'financial',
           badgeLabel: 'اشتراك معتمد',
           isUrgent: false,
@@ -2710,6 +3617,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             amount: targetPayment.amount,
             payment_id: targetPayment.id,
             category: targetPayment.payment_category,
+            obligation_id: matchOblId || undefined,
           },
         });
 
@@ -2720,6 +3628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     },
     [
+      apartmentObligations,
       apartments,
       isCurrentBuildingWritable,
       loadDataFromSupabase,
@@ -2799,14 +3708,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           )
         );
 
+        // If this payment was for a specific obligation that was placed in 'pending', revert it to 'unpaid'
+        const notesStr = targetPayment.notes || '';
+        const matchOblId = notesStr.match(/#([a-zA-Z0-9_-]+)\]/)?.[1];
+        const matchOblTitle = notesStr.match(/\[سداد بند:\s*(.*?)\s*#/)?.[1];
+
+        if (matchOblId) {
+          setApartmentObligations((prev) =>
+            prev.map((o) => (o.id === matchOblId ? { ...o, status: 'unpaid' as const } : o))
+          );
+          if (isSupabaseConfigured && isUuid(matchOblId)) {
+            supabase
+              .from('apartment_obligations')
+              .update({ status: 'unpaid' })
+              .eq('id', matchOblId)
+              .then(() => {});
+          }
+        }
+
+        let rejectTitle = `تعذر اعتماد إيصال السداد (شقة ${effectiveAptNum}) ⚠️`;
+        let rejectBody = `تم رفض طلب السداد بقيمة ${targetPayment.amount.toLocaleString()} ج.م عن ${paymentDesc}. سبب الرفض: "${finalReason}". يرجى إعادة المحاولة أو مراجعة رئيس الاتحاد.`;
+
+        if (matchOblId) {
+          const oblTitle =
+            matchOblTitle ||
+            apartmentObligations.find((o) => o.id === matchOblId)?.title ||
+            'البند المحدد';
+          rejectTitle = `تعذر اعتماد سداد بند (${oblTitle}) ⚠️`;
+          rejectBody = `تم رفض طلب سداد بند (${oblTitle}) بقيمة ${targetPayment.amount.toLocaleString()} ج.م. سبب الرفض: "${finalReason}". تمت إعادة البند لمستحقات شقتك لتتمكن من إعادة سداده.`;
+        }
+
         // Scenario 2A (Reject): Send immediate notification to Resident with rejection reason
         await pushAndRecordNotification({
           recipientId: targetPayment.resident_id || usersByRole.resident.id,
           recipientRole: 'resident',
           recipientPushToken: usersByRole.resident.push_token,
           buildingId: targetPayment.building_id,
-          title: `تعذر اعتماد إيصال السداد (شقة ${effectiveAptNum}) ⚠️`,
-          body: `تم رفض طلب السداد بقيمة ${targetPayment.amount.toLocaleString()} ج.م عن ${paymentDesc}. سبب الرفض: "${finalReason}". يرجى إعادة المحاولة أو مراجعة رئيس الاتحاد.`,
+          title: rejectTitle,
+          body: rejectBody,
           category: 'financial',
           badgeLabel: 'إيصال مرفوض',
           isUrgent: true,
@@ -2816,6 +3755,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             rejection_reason: finalReason,
             payment_id: targetPayment.id,
             category: targetPayment.payment_category,
+            obligation_id: matchOblId || undefined,
           },
         });
 
@@ -2825,6 +3765,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     },
     [
+      apartmentObligations,
       apartments,
       isCurrentBuildingWritable,
       loadDataFromSupabase,
@@ -2832,6 +3773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       processingIds,
       pushAndRecordNotification,
       usersByRole.admin.id,
+      usersByRole.resident.id,
       usersByRole.resident.push_token,
     ]
   );
@@ -3354,9 +4296,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       residentName?: string;
       residentPhone?: string;
       arrearsAmount?: number;
+      stagedObligations?: Array<{
+        id?: string;
+        type: 'monthly_dues' | 'other';
+        title: string;
+        amount: number;
+        year: number;
+        month: number;
+        notes?: string;
+      }>;
     }) => {
       if (!isCurrentBuildingWritable) {
         throw new Error('انتهى اشتراك العمارة (وضع القراءة فقط Read-Only).');
+      }
+
+      // 1. Prevent duplicate apartment numbers in the same building
+      const existingUnit = apartments.find(
+        (a) =>
+          a.building_id === currentBuilding.id &&
+          a.apartment_number.trim() === input.apartmentNumber.trim()
+      );
+      if (existingUnit) {
+        throw new Error(`شقة رقم (${input.apartmentNumber.trim()}) مسجلة بالفعل في هذا العقار.`);
       }
 
       const plan = plans.find((p) => p.code === currentBuilding.plan_code);
@@ -3410,10 +4371,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setApartments((prev) => [newUnit, ...prev]);
 
       let createdDbId = newUnitId;
+      const isValidUuid = (val: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
       if (isSupabaseConfigured && currentBuilding.id) {
         try {
-          const { data: dbApt } = await supabase
+          const { data: dbApt, error: insertErr } = await supabase
             .from('apartments')
             .insert({
               building_id: currentBuilding.id,
@@ -3424,10 +4387,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               ownership_share_percent: newUnit.ownership_share_percent,
               occupant_name: occupantNameTrimmed,
               occupant_phone: occupantPhoneTrimmed,
-              resident_name: newUnit.resident_name,
-              resident_phone: occupantPhoneTrimmed || '',
-              payment_status: initialArrears > 0 ? 'unpaid' : 'paid',
-              unpaid_amount: initialArrears,
               arrears_amount: initialArrears,
               invite_code: newUnit.invite_code,
               is_active: true,
@@ -3435,18 +4394,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             .select()
             .maybeSingle();
 
+          if (insertErr) {
+            setApartments((prev) => prev.filter((a) => a.id !== newUnitId));
+            throw new Error(insertErr.message || 'تعذر إضافة الشقة في قاعدة البيانات.');
+          }
+
           if (dbApt?.id) {
             createdDbId = dbApt.id;
             setApartments((prev) =>
               prev.map((a) => (a.id === newUnitId ? { ...a, id: dbApt.id } : a))
             );
           }
-        } catch (err) {
-          console.warn('Supabase addApartmentUnit error:', err);
+        } catch (err: any) {
+          setApartments((prev) => prev.filter((a) => a.id !== newUnitId));
+          throw err;
         }
       }
 
-      if (initialArrears > 0) {
+      // Handle staged obligations atomically with the created apartment
+      if (input.stagedObligations && input.stagedObligations.length > 0) {
+        for (const obl of input.stagedObligations) {
+          const billingMonth = `${obl.year}-${String(obl.month).padStart(2, '0')}`;
+          const newObl: ApartmentObligation = {
+            id: 'obl-' + Math.random().toString(36).substr(2, 9),
+            building_id: currentBuilding.id,
+            apartment_id: createdDbId,
+            apartment_number: input.apartmentNumber.trim(),
+            title: obl.title.trim(),
+            category: obl.type === 'monthly_dues' ? 'monthly_dues' : 'other',
+            billing_month: billingMonth,
+            amount: obl.amount,
+            status: 'unpaid',
+            notes: obl.notes || `قيد مديونية مسجل عند تأسيس شقة (${input.apartmentNumber.trim()})`,
+            created_at: new Date().toISOString(),
+          };
+          setApartmentObligations((prev) => [newObl, ...prev]);
+
+          if (isSupabaseConfigured && currentBuilding.id && isValidUuid(createdDbId)) {
+            try {
+              const { data: dbObl } = await supabase.from('apartment_obligations').insert({
+                building_id: currentBuilding.id,
+                apartment_id: createdDbId,
+                title: newObl.title,
+                category: newObl.category,
+                billing_month: newObl.billing_month,
+                amount: newObl.amount,
+                status: 'unpaid',
+                notes: newObl.notes,
+                created_by: usersByRole.admin.id && isValidUuid(usersByRole.admin.id) ? usersByRole.admin.id : null,
+              }).select('id').maybeSingle();
+
+              if (dbObl?.id) {
+                setApartmentObligations((prev) =>
+                  prev.map((o) => (o.id === newObl.id ? { ...o, id: dbObl.id } : o))
+                );
+              }
+            } catch (e) {
+              console.warn('Supabase insert staged obligation error:', e);
+            }
+          }
+        }
+      } else if (initialArrears > 0) {
         const initObligation: ApartmentObligation = {
           id: 'obl-' + Date.now(),
           building_id: currentBuilding.id,
@@ -3549,11 +4557,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           if (updates.areaSqm !== undefined) updatePayload.area_sqm = updates.areaSqm;
           if (updates.residentName !== undefined) {
             updatePayload.occupant_name = updates.residentName.trim() || null;
-            updatePayload.resident_name = updates.residentName.trim() || 'وحدة شاغرة';
           }
           if (updates.residentPhone !== undefined) {
             updatePayload.occupant_phone = updates.residentPhone.trim() || null;
-            updatePayload.resident_phone = updates.residentPhone.trim() || '';
           }
 
           if (Object.keys(updatePayload).length > 0) {
@@ -4150,6 +5156,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     [currentBuilding.id, currentRole, loadDataFromSupabase, usersByRole]
   );
 
+  const resetBuildingData = useCallback(
+    async (mode: 'residents_only' | 'full_delete') => {
+      if (!currentBuilding?.id) {
+        throw new Error('لا توجد عمارة محددة حالياً لتنفيذ العملية عليها');
+      }
+      const buildingId = currentBuilding.id;
+
+      if (isSupabaseConfigured) {
+        const { data, error } = await secureRpc.resetBuildingData(buildingId, mode);
+        if (error) {
+          throw new Error(error.message || 'فشلت عملية إعادة تهيئة البيانات');
+        }
+        if (data && typeof data === 'object' && (data as any).success === false) {
+          throw new Error((data as any).error || 'فشلت عملية إعادة تهيئة البيانات');
+        }
+      }
+
+      // Clear local storage pending caches
+      await AsyncStorage.removeItem('@ittihad_local_pending_resident').catch(() => {});
+      await AsyncStorage.removeItem('@ittihad_approved_resident').catch(() => {});
+      await AsyncStorage.removeItem('@ittihad_reviewed_residents').catch(() => {});
+      reviewedResidentKeysRef.current = {};
+      localPendingResidentRef.current = null;
+      lastApprovedResidentRef.current = null;
+
+      if (mode === 'residents_only') {
+        // Clear all resident and transaction state in memory
+        setApartments([]);
+        setApartmentObligations([]);
+        setPayments([]);
+        setExpenses([]);
+        setEmergencyClaims([]);
+        setPendingResidents([]);
+        setBuildingIssues([]);
+        setPolls([]);
+        setPollVotes([]);
+        setIssueUpvotes([]);
+        setBuildings((prev) =>
+          prev.map((b) => (b.id === buildingId ? { ...b, fund_balance: 0 } : b))
+        );
+        await loadDataFromSupabase();
+      } else {
+        // Full delete: cascade delete building, logout, reset to onboarding
+        await logout();
+        setBuildings((prev) => prev.filter((b) => b.id !== buildingId));
+        setApartments([]);
+        setApartmentObligations([]);
+        setPayments([]);
+        setExpenses([]);
+        setEmergencyClaims([]);
+        setPendingResidents([]);
+        setBuildingIssues([]);
+        setPolls([]);
+        setPollVotes([]);
+        setIssueUpvotes([]);
+      }
+    },
+    [currentBuilding.id, loadDataFromSupabase, logout]
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -4190,6 +5256,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         transferApartmentObligations,
         addApartmentObligation,
         settleApartmentObligation,
+        deleteApartmentObligation,
+        updateApartmentObligation,
         submitResidentPayment,
         approveResidentPayment,
         rejectResidentPayment,
@@ -4213,6 +5281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         updateIssueStatus,
         createBuildingPoll,
         castPollVote,
+        resetBuildingData,
       }}
     >
       {children}

@@ -58,6 +58,8 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
     submitResidentPayment,
     switchRole,
     setAuthenticated,
+    refreshData,
+    logout,
   } = useAppStore();
 
   const [activeSubView, setActiveSubView] = useState<ActiveSubView>('none');
@@ -90,18 +92,45 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
     return myObligations.filter((o) => o.status === 'unpaid');
   }, [myObligations]);
 
+  const myActiveObligations = useMemo(() => {
+    return myObligations.filter((o) => o.status === 'unpaid' || o.status === 'pending');
+  }, [myObligations]);
+
   const totalObligationsDebt = useMemo(() => {
     return myUnpaidObligations.reduce((sum, o) => sum + (o.amount || 0), 0);
   }, [myUnpaidObligations]);
 
   const effectiveArrears = useMemo(() => {
     const aptArrears = myApartment?.arrears_amount || myApartment?.unpaid_amount || 0;
+    if (aptArrears > 0 && totalObligationsDebt > 0) {
+      return Math.min(aptArrears, totalObligationsDebt);
+    }
     return Math.max(totalObligationsDebt, aptArrears);
   }, [totalObligationsDebt, myApartment]);
+
+  // Pending payments for arrears or obligations
+  const pendingArrearsPayments = useMemo(() => {
+    const myAptNum = currentUser.apartment_number || myApartment?.apartment_number;
+    const myAptId = currentUser.apartment_id || myApartment?.id;
+    return payments.filter(
+      (p) =>
+        p.status === 'pending' &&
+        ((myAptId && p.apartment_id === myAptId) ||
+          (myAptNum && p.apartment_number && String(p.apartment_number).trim() === String(myAptNum).trim()) ||
+          (currentUser.id && p.resident_id === currentUser.id)) &&
+        (p.notes?.includes('مديونية') || p.notes?.includes('[سداد') || p.payment_category === 'monthly_dues')
+    );
+  }, [payments, currentUser.apartment_id, currentUser.apartment_number, currentUser.id, myApartment]);
+
+  const totalPendingArrearsAmount = useMemo(() => {
+    return pendingArrearsPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  }, [pendingArrearsPayments]);
 
   // Payment State (Screens 8 & 9: PAYMENT_STATUS & PAY_UPLOAD_RECEIPT - _2)
   const [paymentCategory, setPaymentCategory] = useState<PaymentCategoryType>('monthly_dues');
   const [selectedClaim, setSelectedClaim] = useState<EmergencyClaim | null>(null);
+  const [selectedObligation, setSelectedObligation] = useState<ApartmentObligation | null>(null);
+  const [isArrearsPaymentMode, setIsArrearsPaymentMode] = useState<boolean>(false);
   const [paymentAmount, setPaymentAmount] = useState<string>(
     String(currentBuilding.default_monthly_dues || 400)
   );
@@ -185,6 +214,8 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
       );
       return;
     }
+    setSelectedObligation(null);
+    setIsArrearsPaymentMode(false);
     setPaymentCategory('monthly_dues');
     setSelectedClaim(null);
     setPaymentAmount(String(currentBuilding.default_monthly_dues || 400));
@@ -192,20 +223,40 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
     setActiveSubView('payment_modal');
   };
 
-  const openArrearsPaymentSheet = (amount?: number) => {
+  const openObligationPaymentSheet = (obligation: ApartmentObligation) => {
+    setSelectedObligation(obligation);
+    setIsArrearsPaymentMode(true);
+    setSelectedClaim(null);
+    setPaymentCategory(obligation.category || 'monthly_dues');
+    setPaymentAmount(String(obligation.amount));
+    setPaymentMethod('electronic_transfer');
+    setActiveSubView('payment_modal');
+  };
+
+  const openArrearsPaymentSheet = (amount?: number, isPartial?: boolean) => {
     const targetAmount = amount && amount > 0 ? amount : effectiveArrears;
     if (targetAmount <= 0) {
       Alert.alert('لا توجد مديونية', 'لا توجد أي مديونيات أو متأخرات مسجلة على شقتك حالياً.');
       return;
     }
-    setPaymentCategory('monthly_dues');
+    setSelectedObligation(null);
+    setIsArrearsPaymentMode(true);
     setSelectedClaim(null);
-    setPaymentAmount(String(targetAmount));
+    setPaymentCategory('monthly_dues');
+    if (isPartial) {
+      // Suggest reasonable partial amount (e.g. 1000 or half)
+      const suggested = effectiveArrears > 1000 ? '1000' : String(effectiveArrears);
+      setPaymentAmount(suggested);
+    } else {
+      setPaymentAmount(String(targetAmount));
+    }
     setPaymentMethod('electronic_transfer');
     setActiveSubView('payment_modal');
   };
 
   const openEmergencyContributionSheet = (claim: EmergencyClaim) => {
+    setSelectedObligation(null);
+    setIsArrearsPaymentMode(false);
     setPaymentCategory('emergency_claim');
     setSelectedClaim(claim);
     setPaymentAmount(String(claim.default_share_amount || 250));
@@ -244,6 +295,14 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
       return;
     }
 
+    if (isArrearsPaymentMode && !selectedObligation && numericAmount > effectiveArrears) {
+      Alert.alert(
+        'تنبيه',
+        `المبلغ المدخل (${numericAmount.toLocaleString()} ج.م) أكبر من إجمالي المديونية المسجلة (${effectiveArrears.toLocaleString()} ج.م).`
+      );
+      return;
+    }
+
     if (paymentMethod === 'electronic_transfer' && !receiptAttached) {
       Alert.alert(
         'صورة الإيصال مطلوبة',
@@ -252,22 +311,37 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
       return;
     }
 
+    let notesText = '';
+    if (selectedObligation) {
+      notesText = `[سداد بند: ${selectedObligation.title} #${selectedObligation.id}]`;
+    } else if (isArrearsPaymentMode) {
+      if (numericAmount >= effectiveArrears) {
+        notesText = `[سداد كامل المديونية: ${numericAmount} ج.م]`;
+      } else {
+        notesText = `[سداد جزئي من المديونية: ${numericAmount} ج.م من أصل ${effectiveArrears} ج.م]`;
+      }
+    }
+
     setSubmittingPayment(true);
     try {
       await submitResidentPayment({
         amount: numericAmount,
         paymentMethod,
-        billingMonth: currentBillingMonth,
+        billingMonth: selectedObligation?.billing_month || currentBillingMonth,
         cashRecipient: paymentMethod === 'cash' ? cashRecipient : undefined,
         receiptImageUrl: paymentMethod === 'electronic_transfer' ? receiptImageUrl : undefined,
         paymentCategory,
         emergencyClaimId: selectedClaim?.id,
         referenceNumber: referenceNumber.trim() || undefined,
+        notes: notesText || undefined,
+        obligationId: selectedObligation?.id,
+        obligationTitle: selectedObligation?.title,
+        isArrears: isArrearsPaymentMode,
       });
       setActiveSubView('none');
       Alert.alert(
         'تم إرسال طلب السداد ⏳',
-        'حالة الدفعة الآن "قيد المراجعة" (Pending) وستُضاف لرصيد الصندوق فور تدقيقها واعتمادها من رئيس الاتحاد.'
+        'حالة الدفعة الآن "قيد المراجعة" (Pending) وستُضاف لرصيد الصندوق وتُخصم من مديونيتك فور تدقيقها واعتمادها من رئيس الاتحاد.'
       );
     } catch (err: any) {
       Alert.alert('تنبيه', err?.message || 'تعذر إرسال طلب السداد');
@@ -317,16 +391,68 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
           <Text style={styles.pendingScreenDesc}>
             مرحباً {currentUser.full_name}، تم إرسال طلب انضمامك إلى ({currentBuilding.name} - شقة {currentUser.apartment_number || '302'}) وهو بانتظار مراجعة وتفعيل رئيس الاتحاد.
           </Text>
-          <TouchableOpacity
-            style={styles.switchAdminPreviewBtn}
-            onPress={() => {
-              switchRole('admin');
-              setAuthenticated(true);
+          <View
+            style={{
+              flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+              alignItems: 'center',
+              gap: 8,
+              backgroundColor: '#FEF3C7',
+              borderWidth: 1,
+              borderColor: '#FDE68A',
+              borderRadius: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              marginTop: 6,
             }}
           >
-            <MaterialIcons name="admin-panel-settings" size={18} color={COLORS.onPrimary} />
-            <Text style={styles.switchAdminPreviewText}>انتقل لواجهة المدير للاعتماد الفوري</Text>
-          </TouchableOpacity>
+            <MaterialIcons name="info-outline" size={16} color="#D97706" />
+            <Text style={{ fontSize: 12, color: '#92400E', fontWeight: '600' }}>
+              سيصلك إشعار فوري عند قيام رئيس الاتحاد باعتماد حسابك
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row-reverse', gap: 10, marginTop: 14, width: '100%' }}>
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                backgroundColor: COLORS.primary,
+                paddingVertical: 10,
+                borderRadius: 10,
+              }}
+              onPress={async () => {
+                await refreshData();
+                Alert.alert('جاري التحديث 🔄', 'تم فحص أحدث حالة لطلبك من السيرفر.');
+              }}
+            >
+              <MaterialIcons name="refresh" size={16} color="#FFFFFF" />
+              <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>تحديث الحالة</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                backgroundColor: '#FEE2E2',
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: '#FECACA',
+              }}
+              onPress={async () => {
+                await logout();
+              }}
+            >
+              <MaterialIcons name="logout" size={16} color="#DC2626" />
+              <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 13 }}>خروج</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -488,46 +614,92 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
       </View>
 
       {/* 2.1 Resident Arrears & Obligations Detailed Card */}
-      {(effectiveArrears > 0 || myObligations.length > 0) && (
+      {(effectiveArrears > 0 || myActiveObligations.length > 0) && (
         <View style={styles.residentArrearsCard}>
           {/* Header */}
-          <View style={styles.rowBetween}>
-            <View style={styles.rowAlign}>
-              <View style={styles.arrearsAlertIconBox}>
-                <MaterialIcons name="error-outline" size={20} color="#DC2626" />
+          <View style={styles.arrearsMainHeader}>
+            <View style={styles.arrearsMainHeaderRight}>
+              <View
+                style={[
+                  styles.arrearsAlertIconBox,
+                  totalPendingArrearsAmount > 0 && { backgroundColor: '#FEF3C7' },
+                ]}
+              >
+                <MaterialIcons
+                  name={totalPendingArrearsAmount > 0 ? 'hourglass-top' : 'error-outline'}
+                  size={22}
+                  color={totalPendingArrearsAmount > 0 ? '#B45309' : '#DC2626'}
+                />
               </View>
-              <View>
-                <Text style={styles.residentArrearsTitle}>
-                  سجل المديونيات والالتزامات المستحقة على شقتك
+              <View style={{ flex: 1 }}>
+                <Text style={styles.residentArrearsTitle} numberOfLines={1}>
+                  سجل المديونيات والالتزامات المستحقة
                 </Text>
-                <Text style={styles.residentArrearsSub}>
-                  {myUnpaidObligations.length > 0
-                    ? `يوجد ${myUnpaidObligations.length} بند / التزام مالي مطلوب سداده`
+                <Text style={styles.residentArrearsSub} numberOfLines={1}>
+                  {totalPendingArrearsAmount > 0
+                    ? `طلب سداد (${totalPendingArrearsAmount.toLocaleString()} ج.م) قيد المراجعة ⏳`
+                    : myUnpaidObligations.length > 0
+                    ? `يوجد ${myUnpaidObligations.length} بند مطلوب سداده`
+                    : myActiveObligations.some((o) => o.status === 'pending')
+                    ? 'يوجد بنود قيد مراجعة واعتماد الإدارة ⏳'
                     : 'مديونية مسجلة على الوحدة بالاتحاد'}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.arrearsTotalBadge}>
-              <Text style={styles.arrearsTotalBadgeText}>
-                {effectiveArrears.toLocaleString()} ج.م
-              </Text>
+            <View style={{ alignItems: 'flex-end', gap: 2 }}>
+              <View style={styles.arrearsTotalBadge}>
+                <Text style={styles.arrearsTotalBadgeText}>
+                  {effectiveArrears.toLocaleString()} ج.م
+                </Text>
+              </View>
+              {totalPendingArrearsAmount > 0 && (
+                <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>
+                  المتبقي: {Math.max(0, effectiveArrears - totalPendingArrearsAmount).toLocaleString()} ج.م
+                </Text>
+              )}
             </View>
           </View>
 
+          {/* Pending Arrears Banner */}
+          {totalPendingArrearsAmount > 0 && (
+            <View style={styles.arrearsPendingBanner}>
+              <MaterialIcons name="hourglass-top" size={18} color="#B45309" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.arrearsPendingBannerTitle}>
+                  يوجد طلب سداد بقيمة {totalPendingArrearsAmount.toLocaleString()} ج.م قيد المراجعة لدى رئيس الاتحاد ⏳
+                </Text>
+                <Text style={styles.arrearsPendingBannerSub}>
+                  المتبقي المتوقع بعد الاعتماد: {Math.max(0, effectiveArrears - totalPendingArrearsAmount).toLocaleString()} ج.م
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Obligations Breakdown List */}
-          <View style={{ gap: 8, marginTop: 8 }}>
-            {myObligations.length > 0 ? (
-              myObligations.map((o, idx) => (
+          <View style={{ gap: 10, marginTop: 4 }}>
+            {myActiveObligations.length > 0 ? (
+              myActiveObligations.map((o, idx) => (
                 <View
                   key={o.id || String(idx)}
                   style={[
                     styles.residentObligationItem,
                     o.status === 'unpaid' && styles.residentObligationItemUnpaid,
+                    o.status === 'pending' && styles.residentObligationItemPending,
                   ]}
                 >
-                  <View style={styles.rowBetween}>
-                    <View style={[styles.rowAlign, { flex: 1 }]}>
+                  {o.status === 'pending' && (
+                    <View style={styles.obligationPendingOverlayBanner}>
+                      <MaterialIcons name="hourglass-top" size={13} color="#B45309" />
+                      <Text style={styles.obligationPendingOverlayText}>
+                        تم تقديم طلب السداد • قيد مراجعة واعتماد رئيس الاتحاد ⏳
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Top Row: Icon + Title on Right, Amount on Left */}
+                  <View style={styles.obligationItemTopRow}>
+                    <View style={styles.obligationItemTitleBox}>
                       <View
                         style={[
                           styles.obligationTypeIcon,
@@ -538,13 +710,15 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
                       >
                         <MaterialIcons
                           name={o.category === 'monthly_dues' ? 'event-repeat' : 'handyman'}
-                          size={16}
+                          size={18}
                           color={o.category === 'monthly_dues' ? '#2563EB' : '#D97706'}
                         />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <View style={styles.rowAlign}>
-                          <Text style={styles.residentObligationTitle}>{o.title}</Text>
+                        <Text style={styles.residentObligationTitle}>
+                          {o.title}
+                        </Text>
+                        <View style={styles.obligationMetaRow}>
                           <View
                             style={[
                               styles.obligationCategoryTag,
@@ -561,58 +735,107 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
                                   : { color: '#B91C1C' },
                               ]}
                             >
-                              {o.category === 'monthly_dues' ? 'اشتراك عمارة' : 'بند آخر'}
+                              {o.category === 'monthly_dues' ? 'اشتراك عمارة' : 'بند مخصص'}
                             </Text>
                           </View>
-                        </View>
-                        <View style={[styles.rowAlign, { marginTop: 2 }]}>
                           {o.billing_month ? (
                             <Text style={styles.residentObligationMeta}>
                               دورة: شهر {o.billing_month}
                             </Text>
                           ) : null}
-                          {o.transferred_from_apartment_number ? (
-                            <Text style={styles.transferredTagSmall}>
-                              • مرحلة من شقة {o.transferred_from_apartment_number} 🔄
-                            </Text>
-                          ) : null}
                         </View>
-                        {o.notes ? (
-                          <Text style={styles.residentObligationNotes}>
-                            ملاحظات: {o.notes}
-                          </Text>
-                        ) : null}
                       </View>
                     </View>
 
-                    <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+                    <View style={styles.obligationAmountBox}>
                       <Text style={styles.residentObligationAmount}>
-                        {o.amount.toLocaleString()} ج.م
+                        {o.amount.toLocaleString()}
                       </Text>
+                      <Text style={styles.residentObligationCurrency}>ج.م</Text>
+                    </View>
+                  </View>
+
+                  {/* Middle Notes or Transferred Info */}
+                  {(Boolean(o.notes) || Boolean(o.transferred_from_apartment_number)) && (
+                    <View style={styles.obligationNoteCallout}>
+                      {o.transferred_from_apartment_number ? (
+                        <View style={styles.obligationNoteLine}>
+                          <MaterialIcons name="swap-horiz" size={13} color="#D97706" />
+                          <Text style={styles.transferredTagSmall}>
+                            مرحّلة من شقة {o.transferred_from_apartment_number}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {o.notes ? (
+                        <View style={styles.obligationNoteLine}>
+                          <MaterialIcons name="info-outline" size={13} color="#64748B" />
+                          <Text style={styles.residentObligationNotes}>
+                            ملاحظة: {o.notes}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  )}
+
+                  {/* Divider */}
+                  <View style={styles.obligationCardDivider} />
+
+                  {/* Bottom Row: Status Pill on Right, Action Button on Left */}
+                  <View style={styles.obligationBottomActionRow}>
+                    <View
+                      style={[
+                        styles.obligationStatusPill,
+                        o.status === 'unpaid' && { backgroundColor: '#FEE2E2', borderColor: '#FECACA' },
+                        o.status === 'paid' && { backgroundColor: '#D1FAE5', borderColor: '#A7F3D0' },
+                        o.status === 'pending' && { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
+                      ]}
+                    >
                       <View
                         style={[
-                          styles.obligationStatusPill,
-                          o.status === 'unpaid' && { backgroundColor: '#FEE2E2' },
-                          o.status === 'paid' && { backgroundColor: '#D1FAE5' },
-                          o.status === 'pending' && { backgroundColor: '#FEF3C7' },
+                          styles.statusDot,
+                          {
+                            backgroundColor:
+                              o.status === 'unpaid'
+                                ? '#DC2626'
+                                : o.status === 'paid'
+                                ? '#059669'
+                                : '#D97706',
+                          },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.obligationStatusPillText,
+                          o.status === 'unpaid' && { color: '#DC2626' },
+                          o.status === 'paid' && { color: '#059669' },
+                          o.status === 'pending' && { color: '#D97706' },
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.obligationStatusPillText,
-                            o.status === 'unpaid' && { color: '#DC2626' },
-                            o.status === 'paid' && { color: '#059669' },
-                            o.status === 'pending' && { color: '#D97706' },
-                          ]}
-                        >
-                          {o.status === 'unpaid'
-                            ? 'مستحق السداد 🔴'
-                            : o.status === 'paid'
-                            ? 'تمت التسوية ✅'
-                            : 'قيد المراجعة ⏳'}
-                        </Text>
-                      </View>
+                        {o.status === 'unpaid'
+                          ? 'مستحق السداد'
+                          : o.status === 'paid'
+                          ? 'تمت التسوية بنجاح'
+                          : 'قيد مراجعة الإدارة'}
+                      </Text>
                     </View>
+
+                    {o.status === 'unpaid' && (
+                      <TouchableOpacity
+                        style={styles.paySingleObligationBtn}
+                        activeOpacity={0.85}
+                        onPress={() => openObligationPaymentSheet(o)}
+                      >
+                        <MaterialIcons name="credit-card" size={13} color="#FFFFFF" />
+                        <Text style={styles.paySingleObligationText}>سداد هذا البند</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {o.status === 'pending' && (
+                      <View style={styles.pendingReviewMiniBadge}>
+                        <MaterialIcons name="hourglass-top" size={12} color="#D97706" />
+                        <Text style={styles.pendingReviewMiniBadgeText}>بانتظار تأكيد الإدارة ⏳</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               ))
@@ -625,19 +848,32 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
             )}
           </View>
 
-          {/* Quick Settle Action */}
+          {/* Quick Settle Actions */}
           {effectiveArrears > 0 && (
             <View style={styles.arrearsActionsContainer}>
-              <TouchableOpacity
-                style={styles.payArrearsButton}
-                activeOpacity={0.88}
-                onPress={() => openArrearsPaymentSheet(effectiveArrears)}
-              >
-                <MaterialIcons name="bolt" size={18} color="#FFFFFF" />
-                <Text style={styles.payArrearsButtonText}>
-                  سداد المديونية ({effectiveArrears.toLocaleString()} ج.م) ورفع الإيصال ⚡
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.arrearsButtonGroup}>
+                <TouchableOpacity
+                  style={styles.payArrearsButton}
+                  activeOpacity={0.88}
+                  onPress={() => openArrearsPaymentSheet(effectiveArrears)}
+                >
+                  <MaterialIcons name="bolt" size={18} color="#FFFFFF" />
+                  <Text style={styles.payArrearsButtonText}>
+                    سداد كامل المديونية ({effectiveArrears.toLocaleString()} ج.م) ⚡
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.payPartialArrearsButton}
+                  activeOpacity={0.88}
+                  onPress={() => openArrearsPaymentSheet(undefined, true)}
+                >
+                  <MaterialIcons name="tune" size={18} color="#2563EB" />
+                  <Text style={styles.payPartialArrearsButtonText}>
+                    سداد جزئي أو تقسيط مرن 💵
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
@@ -837,59 +1073,202 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
             >
               <MaterialIcons name="arrow-forward" size={22} color={COLORS.onSurface} />
             </TouchableOpacity>
-            <Text style={styles.barCenterTitle}>سداد الاشتراك الشهري</Text>
+            <Text style={styles.barCenterTitle}>
+              {selectedObligation
+                ? 'سداد بند مديونية محدد'
+                : isArrearsPaymentMode
+                ? 'سداد المديونية / تقسيط مرن'
+                : paymentCategory === 'emergency_claim'
+                ? 'سداد مساهمة الطوارئ'
+                : 'سداد الاشتراك الشهري'}
+            </Text>
             <View style={{ width: 40 }} />
           </View>
 
           {/* Bill Summary Card */}
           <View style={styles.formSectionCard}>
             <View style={styles.rowBetween}>
-              <View>
-                <Text style={styles.amountLabelDark}>المطالبة المالية الدورية</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.amountLabelDark}>
+                  {selectedObligation
+                    ? 'تفاصيل البند المستحق'
+                    : isArrearsPaymentMode
+                    ? 'تسوية رصيد المديونية والمتأخرات'
+                    : 'المطالبة المالية الدورية'}
+                </Text>
                 <Text style={styles.billTitleText}>
-                  {paymentCategory === 'monthly_dues'
+                  {selectedObligation
+                    ? selectedObligation.title
+                    : isArrearsPaymentMode
+                    ? 'سداد مديونية سابقة لحساب الشقة'
+                    : paymentCategory === 'monthly_dues'
                     ? `اشتراك صيانة ونظافة شهر ${currentMonthLabel}`
                     : selectedClaim?.title || 'مساهمة صندوق الطوارئ'}
                 </Text>
+                {selectedObligation?.billing_month ? (
+                  <Text style={styles.obligationSubNote}>
+                    دورة شهر: {selectedObligation.billing_month}
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.dueCountdownBadge}>
                 <View style={styles.dotPulseAmber} />
-                <Text style={styles.dueCountdownText}>متبقي 3 أيام</Text>
+                <Text style={styles.dueCountdownText}>
+                  {isArrearsPaymentMode ? 'متأخرات مستحقة' : 'مستحق السداد'}
+                </Text>
               </View>
             </View>
 
-            {/* Amount Banner */}
-            <View style={styles.amountBannerNavy}>
-              <View>
-                <Text style={styles.amountLabelLight}>المبلغ الإجمالي المستحق</Text>
-                <View style={styles.rowAlign}>
-                  <Text style={styles.amountHeroNumber}>{paymentAmount}</Text>
-                  <Text style={styles.currencySubHero}>ج.م</Text>
+            {/* If partial/general arrears mode without single obligation */}
+            {isArrearsPaymentMode && !selectedObligation ? (
+              <View style={styles.partialPayCardContainer}>
+                <Text style={styles.partialPayLabel}>حدد المبلغ الذي ترغب في سداده الآن:</Text>
+
+                {/* Quick Chips */}
+                <View style={styles.quickChipsRow}>
+                  {[500, 1000, 2000]
+                    .filter((amt) => amt < effectiveArrears)
+                    .map((amt) => (
+                      <TouchableOpacity
+                        key={amt}
+                        style={[
+                          styles.quickChipBtn,
+                          paymentAmount === String(amt) && styles.quickChipBtnActive,
+                        ]}
+                        onPress={() => setPaymentAmount(String(amt))}
+                      >
+                        <Text
+                          style={[
+                            styles.quickChipText,
+                            paymentAmount === String(amt) && styles.quickChipTextActive,
+                          ]}
+                        >
+                          {amt.toLocaleString()} ج.م
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  <TouchableOpacity
+                    style={[
+                      styles.quickChipBtn,
+                      paymentAmount === String(effectiveArrears) && styles.quickChipBtnActive,
+                    ]}
+                    onPress={() => setPaymentAmount(String(effectiveArrears))}
+                  >
+                    <Text
+                      style={[
+                        styles.quickChipText,
+                        paymentAmount === String(effectiveArrears) && styles.quickChipTextActive,
+                      ]}
+                    >
+                      كامل المبلغ ({effectiveArrears.toLocaleString()})
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Custom Amount Input */}
+                <View style={styles.amountInputRow}>
+                  <TextInput
+                    style={styles.partialAmountInput}
+                    value={paymentAmount}
+                    onChangeText={(val) => {
+                      const cleaned = val.replace(/[^0-9]/g, '');
+                      setPaymentAmount(cleaned);
+                    }}
+                    keyboardType="numeric"
+                    placeholder="اكتب المبلغ هنا..."
+                    placeholderTextColor={COLORS.outline}
+                  />
+                  <Text style={styles.amountInputCurrency}>ج.م</Text>
+                </View>
+
+                {/* Debt calculation preview */}
+                <View style={styles.debtCalculationBox}>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.calcLabel}>إجمالي المديونية المسجلة:</Text>
+                    <Text style={styles.calcValue}>{effectiveArrears.toLocaleString()} ج.م</Text>
+                  </View>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.calcLabel}>المبلغ المراد سداده الآن:</Text>
+                    <Text style={[styles.calcValue, { color: '#059669', fontWeight: 'bold' }]}>
+                      {(parseFloat(paymentAmount) || 0).toLocaleString()} ج.م
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.rowBetween,
+                      { borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 6, marginTop: 4 },
+                    ]}
+                  >
+                    <Text style={styles.calcLabelBold}>المتبقي بعد هذا السداد:</Text>
+                    <Text style={styles.calcValueBold}>
+                      {Math.max(
+                        0,
+                        effectiveArrears - (parseFloat(paymentAmount) || 0)
+                      ).toLocaleString()}{' '}
+                      ج.م
+                    </Text>
+                  </View>
                 </View>
               </View>
-              <View style={styles.receiptIconCircle}>
-                <MaterialIcons name="receipt-long" size={24} color={COLORS.secondaryFixed} />
+            ) : (
+              /* Amount Banner */
+              <View style={styles.amountBannerNavy}>
+                <View>
+                  <Text style={styles.amountLabelLight}>
+                    {selectedObligation ? 'قيمة هذا البند' : 'المبلغ الإجمالي المستحق'}
+                  </Text>
+                  <View style={styles.rowAlign}>
+                    <Text style={styles.amountHeroNumber}>{paymentAmount}</Text>
+                    <Text style={styles.currencySubHero}>ج.م</Text>
+                  </View>
+                </View>
+                <View style={styles.receiptIconCircle}>
+                  <MaterialIcons name="receipt-long" size={24} color={COLORS.secondaryFixed} />
+                </View>
               </View>
-            </View>
+            )}
 
             {/* Breakdown Accordion */}
-            <View style={styles.feeBreakdownBox}>
-              <Text style={styles.breakdownHeaderLabel}>تفصيل الرسوم المستحقة:</Text>
-              <View style={styles.rowBetween}>
-                <View style={styles.rowAlign}>
-                  <View style={styles.bulletDot} />
-                  <Text style={styles.feeItemName}>صيانة المصعد الدورية وخدمات الكهرباء</Text>
+            {selectedObligation ? (
+              <View style={styles.feeBreakdownBox}>
+                <Text style={styles.breakdownHeaderLabel}>تفاصيل البند المالي:</Text>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.feeItemName}>اسم البند:</Text>
+                  <Text style={styles.feeItemAmount}>{selectedObligation.title}</Text>
                 </View>
-                <Text style={styles.feeItemAmount}>250 ج.م</Text>
+                {selectedObligation.notes ? (
+                  <View style={[styles.rowBetween, { marginTop: 4 }]}>
+                    <Text style={styles.feeItemName}>ملاحظات رئيس الاتحاد:</Text>
+                    <Text style={styles.feeItemAmount}>{selectedObligation.notes}</Text>
+                  </View>
+                ) : null}
               </View>
-              <View style={styles.rowBetween}>
-                <View style={styles.rowAlign}>
-                  <View style={styles.bulletDot} />
-                  <Text style={styles.feeItemName}>خدمات الحراسة والأمن والنظافة اليومية</Text>
+            ) : isArrearsPaymentMode ? (
+              <View style={styles.feeBreakdownBox}>
+                <Text style={styles.breakdownHeaderLabel}>مرونة التقسيط والتسوية:</Text>
+                <Text style={styles.arrearsNoticeText}>
+                  💡 يمكنك سداد كامل المديونية أو دفع أي جزء مالي تختاره. فور اعتماد رئيس الاتحاد للإيصال سيتم خصم هذا المبلغ فوراً من كشف حساب شقتك وتحديث المتبقي.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.feeBreakdownBox}>
+                <Text style={styles.breakdownHeaderLabel}>تفصيل الرسوم المستحقة:</Text>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowAlign}>
+                    <View style={styles.bulletDot} />
+                    <Text style={styles.feeItemName}>صيانة المصعد الدورية وخدمات الكهرباء</Text>
+                  </View>
+                  <Text style={styles.feeItemAmount}>250 ج.م</Text>
                 </View>
-                <Text style={styles.feeItemAmount}>150 ج.م</Text>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowAlign}>
+                    <View style={styles.bulletDot} />
+                    <Text style={styles.feeItemName}>خدمات الحراسة والأمن والنظافة اليومية</Text>
+                  </View>
+                  <Text style={styles.feeItemAmount}>150 ج.م</Text>
+                </View>
               </View>
-            </View>
+            )}
           </View>
 
           {/* Payment Method Switcher */}
@@ -1266,7 +1645,15 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
                       <MaterialIcons name="receipt" size={18} color={COLORS.primary} />
                     </View>
                     <View>
-                      <Text style={styles.historyItemTitle}>سداد اشتراك دورة {p.billing_month || '2024'}</Text>
+                      <Text style={styles.historyItemTitle}>
+                        {p.payment_category === 'emergency_claim'
+                          ? 'مساهمة صيانة طارئة'
+                          : p.notes?.includes('[سداد بند:')
+                          ? `سداد بند: ${p.notes.match(/\[سداد بند:\s*(.*?)(?:\s*#|\s*\])/)?.[1] || 'التزام محدد'}`
+                          : p.notes?.includes('مديونية')
+                          ? 'سداد مديونية / متأخرات'
+                          : `اشتراك شهر ${p.billing_month || '-'}`}
+                      </Text>
                       <Text style={styles.historyItemDate}>{new Date(p.created_at).toLocaleDateString('ar-EG')}</Text>
                     </View>
                   </View>
@@ -2831,7 +3218,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.5)',
   },
   residentArrearsCard: {
-    backgroundColor: '#FFF5F5',
+    backgroundColor: '#FFF8F8',
     borderRadius: 16,
     padding: 16,
     borderWidth: 1.5,
@@ -2843,98 +3230,291 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 2,
   },
+  arrearsMainHeader: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  arrearsMainHeaderRight: {
+    flex: 1,
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
   arrearsAlertIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FEE2E2',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   residentArrearsTitle: {
     fontSize: 14,
     fontWeight: '800',
     color: '#991B1B',
+    textAlign: I18nManager.isRTL ? 'left' : 'right',
   },
   residentArrearsSub: {
     fontSize: 11,
     color: '#B91C1C',
-    marginTop: 1,
+    marginTop: 2,
+    textAlign: I18nManager.isRTL ? 'left' : 'right',
   },
   arrearsTotalBadge: {
     backgroundColor: '#DC2626',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 9999,
+    flexShrink: 0,
   },
   arrearsTotalBadgeText: {
     fontSize: 13,
     fontWeight: '800',
     color: '#FFFFFF',
   },
+  arrearsPendingBanner: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 8,
+  },
+  arrearsPendingBannerTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#92400E',
+    textAlign: I18nManager.isRTL ? 'left' : 'right',
+  },
+  arrearsPendingBannerSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#B45309',
+    marginTop: 2,
+    textAlign: I18nManager.isRTL ? 'left' : 'right',
+  },
+
+  // Item Card
   residentObligationItem: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    gap: 10,
+    shadowColor: '#64748B',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 1,
   },
   residentObligationItemUnpaid: {
-    borderColor: '#FCA5A5',
+    borderColor: '#FECACA',
     backgroundColor: '#FFFFFF',
   },
-  obligationTypeIcon: {
-    width: 32,
-    height: 32,
+  residentObligationItemPending: {
+    opacity: 0.72,
+    borderColor: '#F59E0B',
+    borderStyle: 'dashed',
+    borderWidth: 1.5,
+    backgroundColor: '#FFFBEB',
+  },
+  obligationPendingOverlayBanner: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginBottom: 2,
+  },
+  obligationPendingOverlayText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+
+  // Item Top Row
+  obligationItemTopRow: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  obligationItemTitleBox: {
+    flex: 1,
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  obligationTypeIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+    marginTop: 2,
   },
   residentObligationTitle: {
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: I18nManager.isRTL ? 'left' : 'right',
+    lineHeight: 20,
+  },
+
+  // Amount Box (Top Left)
+  obligationAmountBox: {
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    flexShrink: 0,
+    minWidth: 70,
+  },
+  residentObligationAmount: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#DC2626',
+    textAlign: 'center',
+  },
+  residentObligationCurrency: {
+    fontSize: 10,
     fontWeight: '700',
-    color: '#1E293B',
-    textAlign: 'right',
+    color: '#991B1B',
+    textAlign: 'center',
+  },
+
+  // Meta & Tags Row
+  obligationMetaRow: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
   },
   obligationCategoryTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   obligationCategoryTagText: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '700',
   },
   residentObligationMeta: {
     fontSize: 11,
     color: '#64748B',
+    fontWeight: '500',
   },
   transferredTagSmall: {
     fontSize: 10,
     fontWeight: '700',
     color: '#D97706',
   },
-  residentObligationNotes: {
-    fontSize: 10,
-    color: '#64748B',
-    fontStyle: 'italic',
-    marginTop: 2,
-    textAlign: 'right',
+
+  // Notes callout
+  obligationNoteCallout: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 4,
   },
-  residentObligationAmount: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#DC2626',
+  obligationNoteLine: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  residentObligationNotes: {
+    flex: 1,
+    fontSize: 11,
+    color: '#475569',
+    textAlign: I18nManager.isRTL ? 'left' : 'right',
+    lineHeight: 16,
+  },
+
+  // Divider
+  obligationCardDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginVertical: 2,
+  },
+
+  // Bottom Action Row
+  obligationBottomActionRow: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   obligationStatusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginTop: 4,
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   obligationStatusPillText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
+  },
+  paySingleObligationBtn: {
+    backgroundColor: '#2563EB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    shadowColor: '#2563EB',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  paySingleObligationText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  pendingReviewMiniBadge: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  pendingReviewMiniBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#B45309',
   },
   unspecifiedArrearsBox: {
     backgroundColor: '#FFFFFF',
@@ -2950,7 +3530,10 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   arrearsActionsContainer: {
-    marginTop: 4,
+    marginTop: 6,
+  },
+  arrearsButtonGroup: {
+    gap: 8,
   },
   payArrearsButton: {
     backgroundColor: '#DC2626',
@@ -2970,5 +3553,123 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  payPartialArrearsButton: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    height: 42,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  payPartialArrearsButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  obligationSubNote: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  arrearsNoticeText: {
+    fontSize: 12,
+    color: '#1E293B',
+    lineHeight: 18,
+    textAlign: 'right',
+  },
+  partialPayCardContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginTop: 8,
+    gap: 12,
+  },
+  partialPayLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E293B',
+    textAlign: 'right',
+  },
+  quickChipsRow: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickChipBtn: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  quickChipBtnActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  quickChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  quickChipTextActive: {
+    color: '#FFFFFF',
+  },
+  amountInputRow: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#93C5FD',
+    paddingHorizontal: 12,
+    height: 48,
+  },
+  partialAmountInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1E293B',
+    textAlign: 'right',
+    padding: 0,
+  },
+  amountInputCurrency: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748B',
+    marginRight: 6,
+  },
+  debtCalculationBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+  },
+  calcLabel: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  calcValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  calcLabelBold: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#991B1B',
+  },
+  calcValueBold: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#DC2626',
   },
 });

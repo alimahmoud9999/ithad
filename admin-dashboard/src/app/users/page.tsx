@@ -144,7 +144,7 @@ export default function UsersDirectoryPage() {
                         {usr.full_name}
                       </div>
                       <div className="text-xs text-slate-500">
-                        تاريخ التسجيل: {usr.created_at.slice(0, 10)}
+                        تاريخ التسجيل: {(usr.created_at || '').slice(0, 10)}
                       </div>
                     </td>
 

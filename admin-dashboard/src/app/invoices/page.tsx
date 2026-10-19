@@ -207,7 +207,7 @@ export default function SubscriptionInvoicesPage() {
                     <div className="flex items-center justify-between py-1">
                       <span className="text-slate-500">تاريخ الرفع:</span>
                       <span className="text-slate-700 font-medium">
-                        {inv.created_at.slice(0, 10)}
+                        {(inv.created_at || '').slice(0, 10)}
                       </span>
                     </div>
 

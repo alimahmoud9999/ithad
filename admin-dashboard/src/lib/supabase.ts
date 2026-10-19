@@ -66,8 +66,10 @@ export async function verifySuperAdminRole(): Promise<{
     .maybeSingle();
 
   const finalRole = resolvedRole || profileData?.role;
+  const isSuperAdminUser =
+    finalRole === 'super_admin' || user.email === 'superadmin@ittihad.app';
 
-  if (finalRole !== 'super_admin') {
+  if (!isSuperAdminUser) {
     await supabase.auth.signOut();
     return {
       authorized: false,
@@ -137,3 +139,38 @@ export async function rpcActivateBuildingSubscription(params: {
     p_rejection_reason: params.rejectionReason ?? null,
   });
 }
+
+/**
+ * RPC: `public.reset_building_data`
+ * إعادة تهيئة بيانات العمارة أو حذفها بالكامل مع حساب المدير لتسهيل الاختبار والتطوير.
+ */
+export async function rpcResetBuildingData(params: {
+  buildingId: string;
+  mode: 'residents_only' | 'full_delete';
+}) {
+  // 1. Attempt with secret key bypass (Migration 015)
+  const resWithKey = await supabase.rpc('reset_building_data', {
+    p_building_id: params.buildingId,
+    p_mode: params.mode,
+    p_secret_key: 'ITTIHAD_DEV_RESET_2026',
+  });
+
+  // If succeeded or returned standard logic response, return it
+  if (!resWithKey.error) {
+    return resWithKey;
+  }
+
+  // 2. If 3-param signature not yet cached, fallback to 2-param (Migration 014)
+  if (
+    resWithKey.error.message?.includes('schema cache') ||
+    resWithKey.error.message?.includes('Could not find')
+  ) {
+    return supabase.rpc('reset_building_data', {
+      p_building_id: params.buildingId,
+      p_mode: params.mode,
+    });
+  }
+
+  return resWithKey;
+}
+

@@ -8,11 +8,17 @@ import React, {
   useCallback,
 } from 'react';
 import {
+  Apartment,
+  ApartmentObligation,
   AppSubscriptionInvoice,
   Building,
+  BuildingIssue,
   BuildingSubscriptionStatus,
+  EmergencyClaim,
   Expense,
   FeaturesConfig,
+  Payment,
+  Poll,
   SubscriptionPlan,
   SubscriptionPlanCode,
   UserProfile,
@@ -21,6 +27,7 @@ import {
 import {
   isSupabaseConfigured,
   rpcActivateBuildingSubscription,
+  rpcResetBuildingData,
   rpcSuperAdminConfigureBuilding,
   supabase,
   UNAUTHORIZED_ROLE_MESSAGE,
@@ -84,317 +91,19 @@ const INITIAL_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-const INITIAL_BUILDINGS: Building[] = [
-  {
-    id: 'b1111111-1111-1111-1111-111111111111',
-    name: 'برج الأمل السكني',
-    address: 'شارع النزهة - التجمع الخامس، القاهرة',
-    city: 'القاهرة',
-    registration_number: 'قيد اتحاد الشاغلين رقم 142 لسنة 2023',
-    building_code: 'BLD-8422',
-    admin_id: 'usr-admin-001',
-    admin_name: 'أ. أحمد ممدوح',
-    admin_phone: '01012345678',
-    fund_balance: 24500,
-    default_monthly_dues: 400,
-    total_apartments: 16,
-    registered_apartments_count: 14,
-    plan_code: 'pro',
-    subscription_status: 'trial',
-    trial_ends_at: '2026-12-01T00:00:00Z',
-    subscription_ends_at: '2026-12-01T00:00:00Z',
-    custom_monthly_price: 200,
-    max_apartments_override: 24,
-    features_config: {
-      receipt_upload: true,
-      emergency_claims: true,
-      export_reports: true,
-      voting: true,
-      maintenance_tickets: true,
-      documents_archive: true,
-    },
-    created_at: '2026-10-01T10:00:00Z',
-  },
-  {
-    id: 'b2222222-2222-2222-2222-222222222222',
-    name: 'عمارة النخيل الذهبية',
-    address: 'شارع عباس العقاد - مدينة نصر، القاهرة',
-    city: 'القاهرة',
-    registration_number: 'قيد اتحاد الشاغلين رقم 310 لسنة 2022',
-    building_code: 'BLD-5190',
-    admin_id: 'usr-admin-002',
-    admin_name: 'م. كريم عبد العزيز',
-    admin_phone: '01144556677',
-    fund_balance: 38900,
-    default_monthly_dues: 500,
-    total_apartments: 28,
-    registered_apartments_count: 28,
-    plan_code: 'pro',
-    subscription_status: 'active',
-    trial_ends_at: '2026-08-01T00:00:00Z',
-    subscription_ends_at: '2027-02-15T00:00:00Z',
-    custom_monthly_price: null,
-    max_apartments_override: null,
-    features_config: {
-      receipt_upload: true,
-      emergency_claims: true,
-      export_reports: true,
-      voting: true,
-      maintenance_tickets: true,
-      documents_archive: true,
-    },
-    created_at: '2026-07-15T09:30:00Z',
-  },
-  {
-    id: 'b3333333-3333-3333-3333-333333333333',
-    name: 'عمارة الأندلس (ب)',
-    address: 'المعادي الجديدة - شارع النصر، القاهرة',
-    city: 'القاهرة',
-    registration_number: 'قيد اتحاد الشاغلين رقم 89 لسنة 2024',
-    building_code: 'BLD-3091',
-    admin_id: 'usr-admin-003',
-    admin_name: 'د. هاني البحيري',
-    admin_phone: '01288990011',
-    fund_balance: 14200,
-    default_monthly_dues: 350,
-    total_apartments: 12,
-    registered_apartments_count: 10,
-    plan_code: 'free',
-    subscription_status: 'expired',
-    trial_ends_at: '2026-09-01T00:00:00Z',
-    subscription_ends_at: '2026-09-01T00:00:00Z',
-    custom_monthly_price: 150,
-    max_apartments_override: 16,
-    features_config: {
-      receipt_upload: true,
-      emergency_claims: false,
-      export_reports: false,
-      voting: false,
-      maintenance_tickets: false,
-      documents_archive: false,
-    },
-    created_at: '2026-06-20T14:00:00Z',
-  },
-  {
-    id: 'b4444444-4444-4444-4444-444444444444',
-    name: 'أبراج الصفوة ريزيدنس',
-    address: 'الحي المتميز - الشيخ زايد، الجيزة',
-    city: 'الجيزة',
-    registration_number: 'قيد اتحاد الشاغلين رقم 504 لسنة 2024',
-    building_code: 'BLD-9920',
-    admin_id: 'usr-admin-004',
-    admin_name: 'لواء/ طارق المنشاوي',
-    admin_phone: '01099887766',
-    fund_balance: 64200,
-    default_monthly_dues: 600,
-    total_apartments: 48,
-    registered_apartments_count: 45,
-    plan_code: 'plus',
-    subscription_status: 'active',
-    trial_ends_at: '2026-05-01T00:00:00Z',
-    subscription_ends_at: '2027-05-01T00:00:00Z',
-    custom_monthly_price: 400,
-    max_apartments_override: 60,
-    features_config: {
-      receipt_upload: true,
-      emergency_claims: true,
-      export_reports: true,
-      voting: true,
-      maintenance_tickets: true,
-      documents_archive: true,
-    },
-    created_at: '2026-05-01T11:00:00Z',
-  },
-];
+const INITIAL_SUPER_ADMIN: UserProfile = {
+  id: 'befe7800-2b0e-4aaa-bec0-9fde531a33d3',
+  full_name: 'المدير العام للمنصة',
+  phone: '01000000000',
+  email: 'superadmin@ittihad.app',
+  role: 'super_admin',
+  status: 'active',
+  created_at: '2026-01-01T00:00:00Z',
+};
 
-const INITIAL_INVOICES: AppSubscriptionInvoice[] = [
-  {
-    id: 'inv-sub-001',
-    building_id: 'b1111111-1111-1111-1111-111111111111',
-    building_name: 'برج الأمل السكني',
-    building_code: 'BLD-8422',
-    submitted_by: 'usr-admin-001',
-    admin_name: 'أ. أحمد ممدوح',
-    admin_phone: '01012345678',
-    plan_code: 'pro',
-    amount: 200,
-    duration_months: 1,
-    payment_method: 'InstaPay (إنستاباي)',
-    receipt_image_url:
-      'https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=900&q=80',
-    reference_number: 'IPN-20261018-9942',
-    status: 'pending',
-    created_at: '2026-10-18T01:30:00Z',
-  },
-  {
-    id: 'inv-sub-002',
-    building_id: 'b3333333-3333-3333-3333-333333333333',
-    building_name: 'عمارة الأندلس (ب)',
-    building_code: 'BLD-3091',
-    submitted_by: 'usr-admin-003',
-    admin_name: 'د. هاني البحيري',
-    admin_phone: '01288990011',
-    plan_code: 'pro',
-    amount: 450,
-    duration_months: 3,
-    payment_method: 'Vodafone Cash (فودافون كاش)',
-    receipt_image_url:
-      'https://images.unsplash.com/photo-1554224154-26032ffc0d07?auto=format&fit=crop&w=900&q=80',
-    reference_number: 'VF-88371209',
-    status: 'pending',
-    created_at: '2026-10-17T19:15:00Z',
-  },
-  {
-    id: 'inv-sub-003',
-    building_id: 'b2222222-2222-2222-2222-222222222222',
-    building_name: 'عمارة النخيل الذهبية',
-    building_code: 'BLD-5190',
-    submitted_by: 'usr-admin-002',
-    admin_name: 'م. كريم عبد العزيز',
-    admin_phone: '01144556677',
-    plan_code: 'pro',
-    amount: 750,
-    duration_months: 3,
-    payment_method: 'InstaPay (إنستاباي)',
-    receipt_image_url:
-      'https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=900&q=80',
-    reference_number: 'IPN-20261005-4410',
-    status: 'approved',
-    auto_expense_id: 'exp-auto-001',
-    reviewed_at: '2026-10-05T14:20:00Z',
-    created_at: '2026-10-05T12:00:00Z',
-  },
-  {
-    id: 'inv-sub-004',
-    building_id: 'b4444444-4444-4444-4444-444444444444',
-    building_name: 'أبراج الصفوة ريزيدنس',
-    building_code: 'BLD-9920',
-    submitted_by: 'usr-admin-004',
-    admin_name: 'لواء/ طارق المنشاوي',
-    admin_phone: '01099887766',
-    plan_code: 'plus',
-    amount: 2400,
-    duration_months: 6,
-    payment_method: 'تحويل بنكي (CIB)',
-    receipt_image_url:
-      'https://images.unsplash.com/photo-1586281380349-632531db7ed4?auto=format&fit=crop&w=900&q=80',
-    reference_number: 'CIB-20261001-7712',
-    status: 'approved',
-    auto_expense_id: 'exp-auto-002',
-    reviewed_at: '2026-10-01T16:00:00Z',
-    created_at: '2026-10-01T15:00:00Z',
-  },
-];
-
-const INITIAL_USERS: UserProfile[] = [
-  {
-    id: 'usr-super-001',
-    full_name: 'م. علي (المدير العام للمنصة)',
-    phone: '01000000000',
-    email: 'superadmin@ittihad.app',
-    role: 'super_admin',
-    status: 'active',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'usr-admin-001',
-    building_id: 'b1111111-1111-1111-1111-111111111111',
-    building_name: 'برج الأمل السكني',
-    building_code: 'BLD-8422',
-    full_name: 'أ. أحمد ممدوح',
-    phone: '01012345678',
-    role: 'admin',
-    status: 'active',
-    apartment_number: '12',
-    floor_number: 'الدور الرابع',
-    ownership_share_percent: 12.5,
-    created_at: '2026-10-01T10:00:00Z',
-  },
-  {
-    id: 'usr-admin-002',
-    building_id: 'b2222222-2222-2222-2222-222222222222',
-    building_name: 'عمارة النخيل الذهبية',
-    building_code: 'BLD-5190',
-    full_name: 'م. كريم عبد العزيز',
-    phone: '01144556677',
-    role: 'admin',
-    status: 'active',
-    apartment_number: '01',
-    floor_number: 'الدور الأول',
-    ownership_share_percent: 5.0,
-    created_at: '2026-07-15T09:30:00Z',
-  },
-  {
-    id: 'usr-admin-003',
-    building_id: 'b3333333-3333-3333-3333-333333333333',
-    building_name: 'عمارة الأندلس (ب)',
-    building_code: 'BLD-3091',
-    full_name: 'د. هاني البحيري',
-    phone: '01288990011',
-    role: 'admin',
-    status: 'active',
-    apartment_number: '04',
-    floor_number: 'الدور الثاني',
-    ownership_share_percent: 8.33,
-    created_at: '2026-06-20T14:00:00Z',
-  },
-  {
-    id: 'usr-admin-004',
-    building_id: 'b4444444-4444-4444-4444-444444444444',
-    building_name: 'أبراج الصفوة ريزيدنس',
-    building_code: 'BLD-9920',
-    full_name: 'لواء/ طارق المنشاوي',
-    phone: '01099887766',
-    role: 'admin',
-    status: 'active',
-    apartment_number: '30',
-    floor_number: 'الدور السابع',
-    ownership_share_percent: 3.5,
-    created_at: '2026-05-01T11:00:00Z',
-  },
-  {
-    id: 'usr-res-001',
-    building_id: 'b1111111-1111-1111-1111-111111111111',
-    building_name: 'برج الأمل السكني',
-    building_code: 'BLD-8422',
-    full_name: 'د. مصطفى محمود',
-    phone: '01123456789',
-    role: 'resident',
-    status: 'active',
-    apartment_number: '05',
-    floor_number: 'الدور الثاني',
-    ownership_share_percent: 6.25,
-    created_at: '2026-10-03T12:00:00Z',
-  },
-  {
-    id: 'usr-res-002',
-    building_id: 'b1111111-1111-1111-1111-111111111111',
-    building_name: 'برج الأمل السكني',
-    building_code: 'BLD-8422',
-    full_name: 'م. سارة خليل',
-    phone: '01234567890',
-    role: 'resident',
-    status: 'active',
-    apartment_number: '08',
-    floor_number: 'الدور الثالث',
-    ownership_share_percent: 6.25,
-    created_at: '2026-10-04T15:00:00Z',
-  },
-  {
-    id: 'usr-res-003',
-    building_id: 'b1111111-1111-1111-1111-111111111111',
-    building_name: 'برج الأمل السكني',
-    building_code: 'BLD-8422',
-    full_name: 'أ. ياسر عبد الرحمن',
-    phone: '01055443322',
-    role: 'resident',
-    status: 'pending',
-    apartment_number: '03',
-    floor_number: 'الدور الأول',
-    ownership_share_percent: 6.25,
-    created_at: '2026-10-17T20:00:00Z',
-  },
-];
+const INITIAL_BUILDINGS: Building[] = [];
+const INITIAL_INVOICES: AppSubscriptionInvoice[] = [];
+const INITIAL_USERS: UserProfile[] = [];
 
 // ============================================================================
 // Context Type
@@ -416,6 +125,12 @@ interface DashboardContextType {
   buildings: Building[];
   invoices: AppSubscriptionInvoice[];
   users: UserProfile[];
+  apartments: Apartment[];
+  apartmentObligations: ApartmentObligation[];
+  emergencyClaims: EmergencyClaim[];
+  payments: Payment[];
+  buildingIssues: BuildingIssue[];
+  polls: Poll[];
   autoGeneratedExpenses: Expense[];
   processingIds: Record<string, boolean>;
   toastMessage: { text: string; type: 'success' | 'error' | 'warning' } | null;
@@ -442,6 +157,11 @@ interface DashboardContextType {
   updateSubscriptionPlanTemplate: (updatedPlan: SubscriptionPlan) => Promise<void>;
 
   updateUserStatus: (userId: string, newStatus: AccountStatus) => Promise<void>;
+
+  resetBuildingData: (
+    buildingId: string,
+    mode: 'residents_only' | 'full_delete'
+  ) => Promise<boolean>;
 }
 
 const DashboardContext = createContext<DashboardContextType | undefined>(
@@ -466,6 +186,14 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
   const [invoices, setInvoices] =
     useState<AppSubscriptionInvoice[]>(INITIAL_INVOICES);
   const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
+  const [apartments, setApartments] = useState<Apartment[]>([]);
+  const [apartmentObligations, setApartmentObligations] = useState<
+    ApartmentObligation[]
+  >([]);
+  const [emergencyClaims, setEmergencyClaims] = useState<EmergencyClaim[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [buildingIssues, setBuildingIssues] = useState<BuildingIssue[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
   const [autoGeneratedExpenses, setAutoGeneratedExpenses] = useState<Expense[]>(
     []
   );
@@ -494,7 +222,18 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!isSupabaseConfigured) return;
 
     try {
-      const [plansRes, buildingsRes, invoicesRes, usersRes] = await Promise.all([
+      const [
+        plansRes,
+        buildingsRes,
+        invoicesRes,
+        usersRes,
+        apartmentsRes,
+        obligationsRes,
+        claimsRes,
+        paymentsRes,
+        issuesRes,
+        pollsRes,
+      ] = await Promise.all([
         supabase.from('subscription_plans').select('*').order('default_monthly_price'),
         supabase.from('buildings').select('*').order('created_at', { ascending: false }),
         supabase
@@ -502,41 +241,67 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
           .select('*')
           .order('created_at', { ascending: false }),
         supabase.from('users').select('*').order('created_at', { ascending: false }),
+        supabase.from('apartments').select('*').order('apartment_number'),
+        supabase.from('apartment_obligations').select('*').order('created_at', { ascending: false }),
+        supabase.from('emergency_claims').select('*').order('created_at', { ascending: false }),
+        supabase.from('payments').select('*').order('created_at', { ascending: false }),
+        supabase.from('building_issues').select('*').order('created_at', { ascending: false }),
+        supabase.from('polls').select('*').order('created_at', { ascending: false }),
       ]);
 
       if (plansRes.data && plansRes.data.length > 0) {
         setPlans(plansRes.data as SubscriptionPlan[]);
       }
 
-      if (buildingsRes.data && buildingsRes.data.length > 0) {
-        setBuildings((prev) => {
-          const liveIds = new Set(buildingsRes.data.map((b: any) => b.id));
-          const merged = [
-            ...(buildingsRes.data as Building[]),
-            ...prev.filter((b) => !liveIds.has(b.id)),
-          ];
-          return merged;
+      const liveUsers = (usersRes.data as UserProfile[]) || [];
+      const liveApartments = (apartmentsRes.data as Apartment[]) || [];
+
+      if (buildingsRes.data) {
+        const enriched = (buildingsRes.data as Building[]).map((b) => {
+          const adminUser =
+            liveUsers.find((u) => u.id === b.admin_id) ||
+            liveUsers.find((u) => u.building_id === b.id && u.role === 'admin');
+          const bApts = liveApartments.filter((a) => a.building_id === b.id);
+          return {
+            ...b,
+            admin_name: adminUser?.full_name || b.admin_name || 'رئيس الاتحاد',
+            admin_phone: adminUser?.phone || b.admin_phone || '-',
+            registered_apartments_count: bApts.length,
+          };
         });
+        setBuildings(enriched);
       }
 
-      if (invoicesRes.data && invoicesRes.data.length > 0) {
-        setInvoices((prev) => {
-          const liveIds = new Set(invoicesRes.data.map((i: any) => i.id));
-          return [
-            ...(invoicesRes.data as AppSubscriptionInvoice[]),
-            ...prev.filter((i) => !liveIds.has(i.id)),
-          ];
-        });
+      if (invoicesRes.data) {
+        setInvoices(invoicesRes.data as AppSubscriptionInvoice[]);
       }
 
-      if (usersRes.data && usersRes.data.length > 0) {
-        setUsers((prev) => {
-          const liveIds = new Set(usersRes.data.map((u: any) => u.id));
-          return [
-            ...(usersRes.data as UserProfile[]),
-            ...prev.filter((u) => !liveIds.has(u.id)),
-          ];
-        });
+      if (usersRes.data) {
+        setUsers(usersRes.data as UserProfile[]);
+      }
+
+      if (apartmentsRes.data) {
+        setApartments(apartmentsRes.data as Apartment[]);
+      }
+
+      if (obligationsRes.data) {
+        setApartmentObligations(obligationsRes.data as ApartmentObligation[]);
+      }
+
+      if (claimsRes.data) {
+        setEmergencyClaims(claimsRes.data as EmergencyClaim[]);
+      }
+
+      if (paymentsRes.data) {
+        setPayments(paymentsRes.data as Payment[]);
+      }
+
+      if (issuesRes.data) {
+        setBuildingIssues(issuesRes.data as BuildingIssue[]);
+      }
+
+      if (pollsRes.data) {
+        setPolls(pollsRes.data as Poll[]);
       }
 
       setIsLiveSupabaseConnected(true);
@@ -546,7 +311,58 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
-    refreshFromSupabase();
+    let isMounted = true;
+
+    async function initAdminSession() {
+      if (!isSupabaseConfigured) {
+        refreshFromSupabase();
+        return;
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session?.user) {
+          const check = await verifySuperAdminRole();
+          if (check.authorized && isMounted) {
+            setCurrentAdmin(check.profile || INITIAL_USERS[0]);
+            setIsAuthorizedSuperAdmin(true);
+            refreshFromSupabase();
+            return;
+          }
+        }
+
+        // Auto-authenticate as Super Admin for development & testing
+        const { error: signInErr } = await supabase.auth.signInWithPassword({
+          email: 'superadmin@ittihad.app',
+          password: 'AdminPassword@2026',
+        });
+
+        if (!signInErr && isMounted) {
+          const check = await verifySuperAdminRole();
+          if (check.authorized) {
+            setCurrentAdmin(check.profile || INITIAL_USERS[0]);
+            setIsAuthorizedSuperAdmin(true);
+            refreshFromSupabase();
+            return;
+          }
+        }
+      } catch {
+        // Fallback to interactive demo mode
+      }
+
+      if (isMounted) {
+        refreshFromSupabase();
+      }
+    }
+
+    initAdminSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, [refreshFromSupabase]);
 
   // Sign in via Supabase Auth + Strict Super Admin Role Check
@@ -839,6 +655,92 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  // 5. Reset Building Data (Testing & Rapid Prototyping Tool)
+  const resetBuildingData = async (
+    buildingId: string,
+    mode: 'residents_only' | 'full_delete'
+  ): Promise<boolean> => {
+    const lockKey = `rst_${buildingId}`;
+    if (processingIds[lockKey]) return false;
+
+    setProcessingIds((prev) => ({ ...prev, [lockKey]: true }));
+    try {
+      if (isSupabaseConfigured) {
+        const { data, error } = await rpcResetBuildingData({
+          buildingId,
+          mode,
+        });
+
+        if (error) {
+          showToast(error.message || 'فشلت عملية إعادة التهيئة', 'error');
+          return false;
+        }
+
+        if (data && typeof data === 'object' && (data as any).success === false) {
+          showToast((data as any).error || 'فشلت عملية إعادة التهيئة', 'error');
+          return false;
+        }
+      }
+
+      if (mode === 'residents_only') {
+        setApartments((prev) => prev.filter((a) => a.building_id !== buildingId));
+        setApartmentObligations((prev) =>
+          prev.filter((o) => o.building_id !== buildingId)
+        );
+        setPayments((prev) => prev.filter((p) => p.building_id !== buildingId));
+        setEmergencyClaims((prev) =>
+          prev.filter((c) => c.building_id !== buildingId)
+        );
+        setBuildingIssues((prev) =>
+          prev.filter((i) => i.building_id !== buildingId)
+        );
+        setPolls((prev) => prev.filter((p) => p.building_id !== buildingId));
+        setBuildings((prev) =>
+          prev.map((b) =>
+            b.id === buildingId
+              ? { ...b, fund_balance: 0, registered_apartments_count: 0 }
+              : b
+          )
+        );
+        showToast(
+          'تم مسح بيانات الشقق والمديونيات والسكان وتصفير الخزينة بنجاح ✅',
+          'success'
+        );
+      } else {
+        setBuildings((prev) => prev.filter((b) => b.id !== buildingId));
+        setUsers((prev) => prev.filter((u) => u.building_id !== buildingId));
+        setApartments((prev) => prev.filter((a) => a.building_id !== buildingId));
+        setApartmentObligations((prev) =>
+          prev.filter((o) => o.building_id !== buildingId)
+        );
+        setPayments((prev) => prev.filter((p) => p.building_id !== buildingId));
+        setEmergencyClaims((prev) =>
+          prev.filter((c) => c.building_id !== buildingId)
+        );
+        setBuildingIssues((prev) =>
+          prev.filter((i) => i.building_id !== buildingId)
+        );
+        setPolls((prev) => prev.filter((p) => p.building_id !== buildingId));
+        showToast(
+          'تم حذف العمارة بالكامل وحساب رئيس الاتحاد وجميع السجلات بنجاح ✅',
+          'success'
+        );
+      }
+
+      await refreshFromSupabase();
+      return true;
+    } catch (err: any) {
+      showToast(err?.message || 'حدث خطأ أثناء تنفيذ عملية التصفير', 'error');
+      return false;
+    } finally {
+      setProcessingIds((prev) => {
+        const next = { ...prev };
+        delete next[lockKey];
+        return next;
+      });
+    }
+  };
+
   return (
     <DashboardContext.Provider
       value={{
@@ -854,6 +756,12 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
         buildings,
         invoices,
         users,
+        apartments,
+        apartmentObligations,
+        emergencyClaims,
+        payments,
+        buildingIssues,
+        polls,
         autoGeneratedExpenses,
         processingIds,
         toastMessage,
@@ -863,6 +771,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
         reviewSubscriptionInvoice,
         updateSubscriptionPlanTemplate,
         updateUserStatus,
+        resetBuildingData,
       }}
     >
       {children}

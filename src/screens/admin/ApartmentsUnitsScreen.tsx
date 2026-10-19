@@ -10,6 +10,7 @@ import {
   I18nManager,
   Modal,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../theme/colors';
@@ -68,9 +69,12 @@ export const ApartmentsUnitsScreen: React.FC = () => {
     deleteApartmentUnit,
     addApartmentObligation,
     settleApartmentObligation,
+    deleteApartmentObligation,
+    updateApartmentObligation,
     recordDirectCashPayment,
     transferApartmentObligations,
     sendBulkUnpaidReminder,
+    approveResidentPayment,
   } = useAppStore();
 
   // Search & Filter State
@@ -90,6 +94,7 @@ export const ApartmentsUnitsScreen: React.FC = () => {
   // Staged Obligations for Add Unit Form (User requested dynamic builder)
   const [isAddingArrearsOpen, setIsAddingArrearsOpen] = useState(false);
   const [stagedObligations, setStagedObligations] = useState<StagedObligation[]>([]);
+  const [editingStagedId, setEditingStagedId] = useState<string | null>(null);
   const [obligationType, setObligationType] = useState<'monthly_dues' | 'custom'>('monthly_dues');
   const [obligationAmount, setObligationAmount] = useState(String(currentBuilding.default_monthly_dues || 400));
   const [obligationMonth, setObligationMonth] = useState<number>(new Date().getMonth() + 1);
@@ -98,8 +103,18 @@ export const ApartmentsUnitsScreen: React.FC = () => {
 
   // Year Picker State
   const [yearPickerVisible, setYearPickerVisible] = useState(false);
-  const [yearPickerTarget, setYearPickerTarget] = useState<'add_unit' | 'arrears_modal'>('add_unit');
+  const [yearPickerTarget, setYearPickerTarget] = useState<'add_unit' | 'arrears_modal' | 'edit_obl'>('add_unit');
   const [arrearsModalYear, setArrearsModalYear] = useState<number>(new Date().getFullYear());
+
+  // Edit Registered Obligation State (MODAL 6)
+  const [editOblModalVisible, setEditOblModalVisible] = useState(false);
+  const [editingObl, setEditingObl] = useState<ApartmentObligation | null>(null);
+  const [editOblTitle, setEditOblTitle] = useState('');
+  const [editOblAmount, setEditOblAmount] = useState('');
+  const [editOblMonth, setEditOblMonth] = useState<number>(new Date().getMonth() + 1);
+  const [editOblYear, setEditOblYear] = useState<number>(new Date().getFullYear());
+  const [editOblNotes, setEditOblNotes] = useState('');
+  const [isEditingOblLoading, setIsEditingOblLoading] = useState(false);
 
   // Unit Details Modal State (MODAL 5: تفاصيل الشقة وسجل المديونيات)
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -132,6 +147,7 @@ export const ApartmentsUnitsScreen: React.FC = () => {
 
   // Success Banner after adding unit
   const [lastAddedAptNumber, setLastAddedAptNumber] = useState<string | null>(null);
+  const [isAddingUnitLoading, setIsAddingUnitLoading] = useState(false);
 
   // Fresh resolution of selected detail apartment
   const activeDetailApt = useMemo(() => {
@@ -172,7 +188,10 @@ export const ApartmentsUnitsScreen: React.FC = () => {
         (sum, o) => sum + (Number(o.amount) || 0),
         0
       );
-      const effectiveArrears = Math.max(Number(apt.arrears_amount) || 0, totalOblsDebt);
+      const dbArrears = Number(apt.arrears_amount) || 0;
+      const effectiveArrears = dbArrears > 0 && totalOblsDebt > 0
+        ? Math.min(dbArrears, totalOblsDebt)
+        : Math.max(dbArrears, totalOblsDebt);
       const hasDebt = effectiveArrears > 0;
       const isPending =
         apt.payment_status === 'pending' ||
@@ -184,6 +203,15 @@ export const ApartmentsUnitsScreen: React.FC = () => {
         (apt.payment_status as any) === 'overdue';
       const monthlyDues = currentBuilding.default_monthly_dues || 400;
       const totalDueAmount = effectiveArrears + (isPaid ? 0 : monthlyDues);
+
+      const unitPendingPayments = payments.filter(
+        (p) =>
+          p.status === 'pending' &&
+          ((p.apartment_id && p.apartment_id === apt.id) ||
+            (p.apartment_number &&
+              String(p.apartment_number).trim() === String(apt.apartment_number).trim()))
+      );
+      const pendingAmount = unitPendingPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
       return {
         aptObls,
@@ -197,9 +225,11 @@ export const ApartmentsUnitsScreen: React.FC = () => {
         isOverdue,
         monthlyDues,
         totalDueAmount,
+        unitPendingPayments,
+        pendingAmount,
       };
     },
-    [apartmentObligations, currentBuilding.default_monthly_dues]
+    [apartmentObligations, currentBuilding.default_monthly_dues, payments]
   );
 
   // Statistics calculation for the collection hero card (design/_28)
@@ -245,7 +275,7 @@ export const ApartmentsUnitsScreen: React.FC = () => {
     });
   }, [buildingApartments, searchQuery, activeFilter, getApartmentFinancials]);
 
-  // Add Staged Obligation in Add Unit Modal
+  // Add or Update Staged Obligation in Add Unit Modal
   const handleAddStagedObligation = () => {
     const amount = parseFloat(obligationAmount);
     if (!amount || amount <= 0) {
@@ -267,6 +297,27 @@ export const ApartmentsUnitsScreen: React.FC = () => {
       finalTitle = `${obligationCustomTitle.trim()} (${monthLabel} ${obligationYear})`;
     }
 
+    if (editingStagedId) {
+      setStagedObligations((prev) =>
+        prev.map((o) =>
+          o.id === editingStagedId
+            ? {
+                ...o,
+                type: obligationType,
+                title: finalTitle,
+                amount,
+                month: obligationMonth,
+                year: obligationYear,
+              }
+            : o
+        )
+      );
+      setEditingStagedId(null);
+      setObligationCustomTitle('');
+      Alert.alert('تم التعديل 👍', 'تم تحديث بيانات البند بنجاح في القائمة.');
+      return;
+    }
+
     const newItem: StagedObligation = {
       id: 'stg-' + Date.now() + Math.floor(Math.random() * 1000),
       type: obligationType,
@@ -282,12 +333,37 @@ export const ApartmentsUnitsScreen: React.FC = () => {
     setObligationMonth((prev) => (prev < 12 ? prev + 1 : 1));
   };
 
+  const handleEditStagedObligation = (item: StagedObligation) => {
+    setEditingStagedId(item.id);
+    setObligationType(item.type);
+    setObligationAmount(String(item.amount));
+    setObligationMonth(item.month);
+    setObligationYear(item.year);
+    if (item.type === 'custom') {
+      const match = item.title.match(/^(.*?)\s*\(/);
+      setObligationCustomTitle(match ? match[1].trim() : item.title);
+    } else {
+      setObligationCustomTitle('');
+    }
+    setIsAddingArrearsOpen(true);
+  };
+
+  const handleCancelEditStagedObligation = () => {
+    setEditingStagedId(null);
+    setObligationCustomTitle('');
+    setObligationAmount(String(currentBuilding.default_monthly_dues || 400));
+  };
+
   const handleRemoveStagedObligation = (id: string) => {
+    if (editingStagedId === id) {
+      handleCancelEditStagedObligation();
+    }
     setStagedObligations((prev) => prev.filter((o) => o.id !== id));
   };
 
   // Handle Add Unit Submit (Screen 15: _4)
   const handleAddUnitSubmit = async () => {
+    if (isAddingUnitLoading) return;
     if (!aptNumber.trim()) {
       Alert.alert('تنبيه', 'يرجى إدخال رقم الشقة.');
       return;
@@ -296,7 +372,9 @@ export const ApartmentsUnitsScreen: React.FC = () => {
     const totalStagedArrears = stagedObligations.reduce((sum, item) => sum + item.amount, 0);
 
     try {
-      const createdUnit = await addApartmentUnit({
+      setIsAddingUnitLoading(true);
+
+      await addApartmentUnit({
         apartmentNumber: aptNumber.trim(),
         floorNumber: floorNumber.trim() || 'الدور الأول',
         wingOrDirection: orientation,
@@ -304,24 +382,16 @@ export const ApartmentsUnitsScreen: React.FC = () => {
         residentName: residentName.trim() || 'وحدة شاغرة',
         residentPhone: residentPhone.trim() || '',
         arrearsAmount: totalStagedArrears,
+        stagedObligations: stagedObligations.map((obl) => ({
+          id: obl.id,
+          type: obl.type === 'monthly_dues' ? 'monthly_dues' : 'other',
+          title: obl.title,
+          amount: obl.amount,
+          year: obl.year,
+          month: obl.month,
+          notes: `قيد مديونية مسجل عند تأسيس شقة (${aptNumber.trim()})`,
+        })),
       });
-
-      const targetUnitId = createdUnit?.id;
-
-      // Add each staged obligation to DB & local store
-      if (stagedObligations.length > 0 && targetUnitId) {
-        for (const obl of stagedObligations) {
-          const billingMonth = `${obl.year}-${String(obl.month).padStart(2, '0')}`;
-          await addApartmentObligation({
-            apartmentId: targetUnitId,
-            title: obl.title,
-            amount: obl.amount,
-            billingMonth,
-            category: obl.type === 'monthly_dues' ? 'monthly_dues' : 'other',
-            notes: `قيد مديونية مسجل عند تأسيس شقة (${aptNumber.trim()})`,
-          });
-        }
-      }
 
       // Clear search and reset filter so the new unit is guaranteed visible below!
       setActiveFilter('all');
@@ -343,6 +413,8 @@ export const ApartmentsUnitsScreen: React.FC = () => {
       );
     } catch (err: any) {
       Alert.alert('خطأ', err?.message || 'تعذر إضافة الوحدة');
+    } finally {
+      setIsAddingUnitLoading(false);
     }
   };
 
@@ -378,6 +450,7 @@ export const ApartmentsUnitsScreen: React.FC = () => {
       if (arrearsToAdd > 0) {
         await addApartmentObligation({
           apartmentId: editingApt.id,
+          apartmentNumber: editAptNumber.trim() || editingApt.apartment_number,
           title: editArrearsTitle.trim() || 'مديونية مسجلة من إدارة الاتحاد',
           amount: arrearsToAdd,
           billingMonth: new Date().toISOString().slice(0, 7),
@@ -491,6 +564,7 @@ export const ApartmentsUnitsScreen: React.FC = () => {
         const billingMonth = `${item.year}-${String(item.month).padStart(2, '0')}`;
         await addApartmentObligation({
           apartmentId: arrearsTargetApt.id,
+          apartmentNumber: arrearsTargetApt.apartment_number,
           title: item.title,
           amount: item.amount,
           billingMonth,
@@ -514,6 +588,79 @@ export const ApartmentsUnitsScreen: React.FC = () => {
       );
     } catch (err: any) {
       Alert.alert('خطأ', err?.message || 'تعذر إضافة المديونية.');
+    }
+  };
+
+  // Delete an existing obligation from Apartment Details (Modal 5)
+  const handleDeleteObligation = (obl: ApartmentObligation) => {
+    Alert.alert(
+      'حذف بند المديونية',
+      `هل أنت متأكد من حذف (${obl.title}) بمبلغ (${obl.amount.toLocaleString()} ج.م) نهائياً من سجل مديونيات هذه الشقة؟`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'نعم، حذف نهائي',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteApartmentObligation(obl.id);
+              Alert.alert('تم الحذف بنجاح 🗑️', 'تم حذف بند المديونية وتحديث رصيد الشقة.');
+            } catch (err: any) {
+              Alert.alert('خطأ', err?.message || 'تعذر حذف المديونية');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Open Edit Modal for a registered obligation (Modal 6)
+  const openEditObligationModal = (obl: ApartmentObligation) => {
+    setEditingObl(obl);
+    setEditOblTitle(obl.title);
+    setEditOblAmount(String(obl.amount));
+    if (obl.billing_month && obl.billing_month.includes('-')) {
+      const parts = obl.billing_month.split('-');
+      setEditOblYear(parseInt(parts[0], 10) || new Date().getFullYear());
+      setEditOblMonth(parseInt(parts[1], 10) || new Date().getMonth() + 1);
+    } else {
+      setEditOblYear(new Date().getFullYear());
+      setEditOblMonth(new Date().getMonth() + 1);
+    }
+    setEditOblNotes(obl.notes || '');
+    setEditOblModalVisible(true);
+  };
+
+  // Save changes to registered obligation
+  const handleSaveEditObligationSubmit = async () => {
+    if (!editingObl) return;
+    const amount = parseFloat(editOblAmount);
+    if (!amount || amount <= 0) {
+      Alert.alert('تنبيه', 'يرجى إدخال مبلغ صحيح أكبر من صفر.');
+      return;
+    }
+    if (!editOblTitle.trim()) {
+      Alert.alert('تنبيه', 'يرجى كتابة اسم أو وصف بند المديونية.');
+      return;
+    }
+
+    try {
+      setIsEditingOblLoading(true);
+      const billingMonth = `${editOblYear}-${String(editOblMonth).padStart(2, '0')}`;
+      await updateApartmentObligation(editingObl.id, {
+        title: editOblTitle.trim(),
+        amount,
+        billingMonth,
+        notes: editOblNotes.trim() || undefined,
+      });
+
+      setEditOblModalVisible(false);
+      setEditingObl(null);
+      Alert.alert('تم التعديل بنجاح ✅', 'تم تحديث بيانات المديونية ورصيد الشقة.');
+    } catch (err: any) {
+      Alert.alert('خطأ', err?.message || 'تعذر تعديل المديونية.');
+    } finally {
+      setIsEditingOblLoading(false);
     }
   };
 
@@ -1039,6 +1186,12 @@ export const ApartmentsUnitsScreen: React.FC = () => {
                         {obl.amount.toLocaleString()} ج.م
                       </Text>
                       <TouchableOpacity
+                        style={styles.editStagedBtn}
+                        onPress={() => handleEditStagedObligation(obl)}
+                      >
+                        <MaterialIcons name="edit" size={15} color="#2563EB" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
                         style={styles.removeStagedBtn}
                         onPress={() => handleRemoveStagedObligation(obl.id)}
                       >
@@ -1204,17 +1357,26 @@ export const ApartmentsUnitsScreen: React.FC = () => {
                   </ScrollView>
                 </View>
 
-                {/* Add Staged Obligation Button */}
+                {/* Add / Save Staged Obligation Button */}
                 <TouchableOpacity
-                  style={styles.addStagedItemBtn}
+                  style={[styles.addStagedItemBtn, editingStagedId ? { backgroundColor: '#2563EB' } : null]}
                   activeOpacity={0.88}
                   onPress={handleAddStagedObligation}
                 >
-                  <MaterialIcons name="add" size={18} color="#FFFFFF" />
+                  <MaterialIcons name={editingStagedId ? 'check' : 'add'} size={18} color="#FFFFFF" />
                   <Text style={styles.addStagedItemBtnText}>
-                    + إضافة هذا البند إلى المديونيات
+                    {editingStagedId ? 'حفظ تعديل هذا البند 💾' : '+ إضافة هذا البند إلى المديونيات'}
                   </Text>
                 </TouchableOpacity>
+
+                {editingStagedId && (
+                  <TouchableOpacity
+                    style={[styles.openAddArrearsBtn, { marginTop: 4, borderColor: '#CBD5E1', backgroundColor: '#F8FAFC' }]}
+                    onPress={handleCancelEditStagedObligation}
+                  >
+                    <Text style={[styles.openAddArrearsBtnText, { color: '#64748B' }]}>إلغاء تعديل هذا البند</Text>
+                  </TouchableOpacity>
+                )}
 
                 {/* Option to close form if staged items exist */}
                 {stagedObligations.length > 0 && (
@@ -1243,12 +1405,19 @@ export const ApartmentsUnitsScreen: React.FC = () => {
           </View>
 
           <TouchableOpacity
-            style={styles.primaryActionButton}
+            style={[styles.primaryActionButton, isAddingUnitLoading && { opacity: 0.7 }]}
             activeOpacity={0.88}
             onPress={handleAddUnitSubmit}
+            disabled={isAddingUnitLoading}
           >
-            <MaterialIcons name="add-home" size={20} color={COLORS.onPrimary} />
-            <Text style={styles.primaryActionText}>حفظ وإضافة الوحدة للسجل</Text>
+            {isAddingUnitLoading ? (
+              <ActivityIndicator size="small" color={COLORS.onPrimary} />
+            ) : (
+              <>
+                <MaterialIcons name="add-home" size={20} color={COLORS.onPrimary} />
+                <Text style={styles.primaryActionText}>حفظ وإضافة الوحدة للسجل</Text>
+              </>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </Modal>
@@ -1889,6 +2058,41 @@ export const ApartmentsUnitsScreen: React.FC = () => {
                         </Text>
                       </View>
                     </View>
+
+                    {/* Pending Review Banner with direct Approve button */}
+                    {f.pendingAmount > 0 && (
+                      <View style={styles.unitPendingBannerBox}>
+                        <View style={{ flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                          <View style={{ flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <MaterialIcons name="hourglass-top" size={20} color="#B45309" />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#92400E', textAlign: I18nManager.isRTL ? 'left' : 'right' }}>
+                                يوجد طلب سداد معلق بقيمة {f.pendingAmount.toLocaleString()} ج.م بانتظار الاعتماد ⏳
+                              </Text>
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#B45309', marginTop: 2, textAlign: I18nManager.isRTL ? 'left' : 'right' }}>
+                                الصافي المطلوب بعد الاعتماد: {Math.max(0, f.totalDueAmount - f.pendingAmount).toLocaleString()} ج.م
+                              </Text>
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.approveNowBtn}
+                            onPress={async () => {
+                              try {
+                                for (const p of f.unitPendingPayments) {
+                                  await approveResidentPayment(p.id);
+                                }
+                                Alert.alert('تم الاعتماد بنجاح ✅', 'تم اعتماد السداد وخصم المبلغ وتحديث سجلات الشقة فوراً.');
+                              } catch (err: any) {
+                                Alert.alert('خطأ أثناء الاعتماد', err?.message || 'تعذر اعتماد السداد');
+                              }
+                            }}
+                          >
+                            <MaterialIcons name="check" size={15} color="#FFFFFF" />
+                            <Text style={styles.approveNowBtnText}>اعتماد السداد</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
                   </View>
 
                   {/* Obligations List Section */}
@@ -1983,37 +2187,57 @@ export const ApartmentsUnitsScreen: React.FC = () => {
                                 </View>
                               </View>
 
-                              {/* Settle Action Button if unpaid */}
-                              {isUnpaid && (
+                              {/* Actions Row: Edit, Delete, Settle */}
+                              <View style={styles.obligationActionsRow}>
                                 <TouchableOpacity
-                                  style={styles.settleObligationBtn}
-                                  onPress={() => {
-                                    Alert.alert(
-                                      'تسوية وسداد المديونية',
-                                      `هل تم سداد مبلغ (${o.amount.toLocaleString()} ج.م) الخاص بـ (${o.title}) نقداً لرئيس الاتحاد؟`,
-                                      [
-                                        { text: 'إلغاء', style: 'cancel' },
-                                        {
-                                          text: 'نعم، تم استلام المبلغ ✅',
-                                          onPress: async () => {
-                                            try {
-                                              await settleApartmentObligation(o.id, 'تم السداد نقداً لرئيس الاتحاد');
-                                              Alert.alert('تمت التسوية بنجاح 🎉', 'تم تحديث رصيد الشقة وتسوية المديونية.');
-                                            } catch (err: any) {
-                                              Alert.alert('خطأ', err?.message || 'تعذر تسوية المديونية');
-                                            }
-                                          },
-                                        },
-                                      ]
-                                    );
-                                  }}
+                                  style={styles.obligationEditBtn}
+                                  onPress={() => openEditObligationModal(o)}
                                 >
-                                  <MaterialIcons name="done-all" size={15} color="#059669" />
-                                  <Text style={styles.settleObligationBtnText}>
-                                    تسجيل سداد كاش / تسوية المديونية
-                                  </Text>
+                                  <MaterialIcons name="edit" size={13} color="#2563EB" />
+                                  <Text style={styles.obligationEditBtnText}>تعديل</Text>
                                 </TouchableOpacity>
-                              )}
+
+                                <TouchableOpacity
+                                  style={styles.obligationDeleteBtn}
+                                  onPress={() => handleDeleteObligation(o)}
+                                >
+                                  <MaterialIcons name="delete-outline" size={13} color="#DC2626" />
+                                  <Text style={styles.obligationDeleteBtnText}>حذف</Text>
+                                </TouchableOpacity>
+
+                                {isUnpaid && (
+                                  <TouchableOpacity
+                                    style={styles.settleObligationBtn}
+                                    onPress={() => {
+                                      Alert.alert(
+                                        'تسوية وسداد المديونية',
+                                        `هل تم سداد مبلغ (${o.amount.toLocaleString()} ج.م) الخاص بـ (${o.title}) نقداً لرئيس الاتحاد؟`,
+                                        [
+                                          { text: 'إلغاء', style: 'cancel' },
+                                          {
+                                            text: 'نعم، تم استلام المبلغ ✅',
+                                            onPress: async () => {
+                                              try {
+                                                await settleApartmentObligation(o.id, 'تم السداد نقداً لرئيس الاتحاد');
+                                                Alert.alert('تمت التسوية بنجاح 🎉', 'تم تحديث رصيد الشقة وتسوية المديونية.');
+                                              } catch (err: any) {
+                                                Alert.alert('خطأ', err?.message || 'تعذر تسوية المديونية');
+                                              }
+                                            },
+                                          },
+                                        ]
+                                      );
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row', gap: 4 }}> 
+                                    <Text style={styles.settleObligationBtnText}>
+                                      تسجيل سداد كاش
+                                    </Text>
+                                      <MaterialIcons name="done-all" size={13} color="#059669"  />
+                                    </View>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
                             </View>
                           );
                         })}
@@ -2040,9 +2264,13 @@ export const ApartmentsUnitsScreen: React.FC = () => {
                           <View key={p.id} style={styles.paymentHistoryRow}>
                             <View>
                               <Text style={styles.paymentHistoryTitle}>
-                                {p.payment_category === 'monthly_dues'
-                                  ? `اشتراك شهر ${p.billing_month}`
-                                  : 'مساهمة صيانة طارئة'}
+                                {p.payment_category === 'emergency_claim'
+                                  ? 'مساهمة صيانة طارئة'
+                                  : p.notes?.includes('[سداد بند:')
+                                  ? `سداد بند: ${p.notes.match(/\[سداد بند:\s*(.*?)(?:\s*#|\s*\])/)?.[1] || 'التزام محدد'}`
+                                  : p.notes?.includes('مديونية')
+                                  ? 'سداد مديونية / متأخرات'
+                                  : `اشتراك شهر ${p.billing_month}`}
                               </Text>
                               <Text style={styles.paymentHistorySub}>
                                 {p.payment_method === 'cash' ? 'سداد نقدي (كاش)' : 'تحويل إلكتروني / إنستاباي'} • {new Date(p.created_at).toLocaleDateString('ar-EG')}
@@ -2205,6 +2433,158 @@ export const ApartmentsUnitsScreen: React.FC = () => {
         </Modal>
       )}
 
+      {/* MODAL 6: EDIT REGISTERED OBLIGATION */}
+      <Modal
+        visible={editOblModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          if (!isEditingOblLoading) setEditOblModalVisible(false);
+        }}
+      >
+        <View style={styles.modalBackdropDark}>
+          <View style={[styles.bottomSheetPanel, { maxHeight: '90%' }]}>
+            <View style={styles.sheetGrabBar} />
+
+            {/* Header */}
+            <View style={styles.rowBetween}>
+              <View style={styles.rowAlign}>
+                <View style={[styles.successIconCircle, { backgroundColor: '#2563EB' }]}>
+                  <MaterialIcons name="edit" size={18} color="#FFFFFF" />
+                </View>
+                <View>
+                  <Text style={styles.inviteModalTitle}>تعديل بند المديونية</Text>
+                  <Text style={styles.inviteModalSub}>
+                    تعديل القيمة، الشهر أو وصف الالتزام المسجل
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!isEditingOblLoading) setEditOblModalVisible(false);
+                }}
+              >
+                <MaterialIcons name="close" size={22} color={COLORS.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 10 }}>
+              {/* Obligation Title */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>اسم / وصف البند *</Text>
+                <TextInput
+                  style={styles.textInputField}
+                  value={editOblTitle}
+                  onChangeText={setEditOblTitle}
+                  placeholder="مثال: اشتراك شهر 6، صيانة مصعد"
+                  placeholderTextColor={COLORS.outline}
+                />
+              </View>
+
+              {/* Amount and Year */}
+              <View style={styles.inputsRowAligned}>
+                <View style={{ flex: 1.6 }}>
+                  <Text style={styles.alignedFieldLabel}>المبلغ المستحق (ج.م) *</Text>
+                  <TextInput
+                    style={[styles.alignedTextInput, styles.ltrField]}
+                    value={editOblAmount}
+                    onChangeText={setEditOblAmount}
+                    keyboardType="numeric"
+                    placeholder="400"
+                    placeholderTextColor={COLORS.outline}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.alignedFieldLabel}>السنة *</Text>
+                  <TouchableOpacity
+                    style={styles.yearPickerButton}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setYearPickerTarget('edit_obl');
+                      setYearPickerVisible(true);
+                    }}
+                  >
+                    <MaterialIcons name="calendar-today" size={15} color="#475569" />
+                    <Text style={styles.yearPickerText}>{editOblYear}</Text>
+                    <MaterialIcons name="arrow-drop-down" size={20} color="#475569" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Month Pills */}
+              <View>
+                <Text style={[styles.alignedFieldLabel, { marginBottom: 6 }]}>
+                  عن شهر (اختر من 1 إلى 12):
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.monthScrollRow}
+                >
+                  {MONTHS_CHOICES.map((m) => {
+                    const isSelected = editOblMonth === m.num;
+                    return (
+                      <TouchableOpacity
+                        key={m.num}
+                        style={[
+                          styles.monthSquarePill,
+                          isSelected && styles.monthSquarePillActive,
+                        ]}
+                        onPress={() => setEditOblMonth(m.num)}
+                      >
+                        <Text
+                          style={[
+                            styles.monthSquareNumber,
+                            isSelected && styles.monthSquareNumberActive,
+                          ]}
+                        >
+                          {m.num}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* Notes */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>ملاحظات إضافية (اختياري)</Text>
+                <TextInput
+                  style={[styles.textInputField, { height: 60 }]}
+                  value={editOblNotes}
+                  onChangeText={setEditOblNotes}
+                  placeholder="أي ملاحظات تتعلق بالسداد أو أسباب المديونية..."
+                  placeholderTextColor={COLORS.outline}
+                  multiline
+                />
+              </View>
+
+              {/* Save Button */}
+              <TouchableOpacity
+                style={[
+                  styles.primaryActionButton,
+                  { backgroundColor: '#2563EB', marginTop: 8 },
+                  isEditingOblLoading && { opacity: 0.6 },
+                ]}
+                activeOpacity={0.88}
+                disabled={isEditingOblLoading}
+                onPress={handleSaveEditObligationSubmit}
+              >
+                {isEditingOblLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <MaterialIcons name="save" size={20} color="#FFFFFF" />
+                    <Text style={styles.primaryActionText}>حفظ التعديلات</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* YEAR PICKER MODAL */}
       <Modal
         visible={yearPickerVisible}
@@ -2222,7 +2602,12 @@ export const ApartmentsUnitsScreen: React.FC = () => {
             <Text style={styles.yearPickerSheetTitle}>اختر السنة المالية</Text>
             <View style={styles.yearChoicesGrid}>
               {[2023, 2024, 2025, 2026, 2027, 2028].map((yr) => {
-                const currentYr = yearPickerTarget === 'add_unit' ? obligationYear : arrearsModalYear;
+                const currentYr =
+                  yearPickerTarget === 'add_unit'
+                    ? obligationYear
+                    : yearPickerTarget === 'edit_obl'
+                    ? editOblYear
+                    : arrearsModalYear;
                 const isSelected = currentYr === yr;
                 return (
                   <TouchableOpacity
@@ -2231,6 +2616,8 @@ export const ApartmentsUnitsScreen: React.FC = () => {
                     onPress={() => {
                       if (yearPickerTarget === 'add_unit') {
                         setObligationYear(yr);
+                      } else if (yearPickerTarget === 'edit_obl') {
+                        setEditOblYear(yr);
                       } else {
                         setArrearsModalYear(yr);
                       }
@@ -2973,6 +3360,12 @@ const styles = StyleSheet.create({
   removeStagedBtn: {
     padding: 4,
   },
+  editStagedBtn: {
+    padding: 4,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 6,
+    marginRight: 4,
+  },
   stagedTotalStrip: {
     flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
     alignItems: 'center',
@@ -3416,6 +3809,47 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#DC2626',
   },
+  obligationActionsRow: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  obligationEditBtn: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  obligationEditBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  obligationDeleteBtn: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  obligationDeleteBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
   settleObligationBtn: {
     alignSelf: 'flex-start',
     backgroundColor: '#ECFDF5',
@@ -3424,7 +3858,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    marginTop: 4,
   },
   settleObligationBtnText: {
     fontSize: 11,
@@ -3462,6 +3895,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     marginTop: 2,
+  },
+  unitPendingBannerBox: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 10,
+  },
+  approveNowBtn: {
+    backgroundColor: '#059669',
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  approveNowBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
 

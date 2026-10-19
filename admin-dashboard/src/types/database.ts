@@ -110,3 +110,103 @@ export interface Expense {
   is_system_generated: boolean;
   created_at: string;
 }
+
+export interface Apartment {
+  id: string;
+  building_id: string;
+  apartment_number: string;
+  floor_number?: string | null;
+  wing_or_direction?: string | null;
+  area_sqm?: number | null;
+  occupant_name?: string | null;
+  occupant_phone?: string | null;
+  arrears_amount: number;
+  unpaid_months_count?: number;
+  payment_status: 'paid' | 'unpaid' | 'pending';
+  resident_id?: string | null;
+  resident_name?: string | null;
+  resident_phone?: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ApartmentObligation {
+  id: string;
+  building_id: string;
+  apartment_id: string;
+  apartment_number?: string;
+  title: string;
+  category: 'monthly_dues' | 'emergency_claim';
+  billing_month: string;
+  amount: number;
+  status: 'paid' | 'unpaid' | 'pending';
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface Payment {
+  id: string;
+  building_id: string;
+  apartment_id?: string | null;
+  apartment_number?: string;
+  resident_id: string;
+  resident_name?: string;
+  payment_category: 'monthly_dues' | 'emergency_claim';
+  emergency_claim_id?: string | null;
+  billing_month: string;
+  amount: number;
+  payment_method: 'electronic_transfer' | 'cash';
+  cash_recipient?: 'admin' | 'guard' | null;
+  receipt_image_url?: string | null;
+  reference_number?: string | null;
+  notes?: string | null;
+  status: 'pending' | 'paid' | 'rejected';
+  rejection_reason?: string | null;
+  created_at: string;
+}
+
+export interface EmergencyClaim {
+  id: string;
+  building_id: string;
+  title: string;
+  description?: string | null;
+  category: string;
+  target_amount: number;
+  collected_amount: number;
+  default_share_amount?: number | null;
+  status: 'active' | 'closed';
+  created_at: string;
+}
+
+export interface BuildingIssue {
+  id: string;
+  building_id: string;
+  apartment_number?: string | null;
+  reporter_name?: string | null;
+  title: string;
+  description?: string | null;
+  category: string;
+  severity: 'low' | 'medium' | 'high';
+  image_url?: string | null;
+  is_private: boolean;
+  upvotes_count: number;
+  status: 'open' | 'in_progress' | 'resolved';
+  created_at: string;
+}
+
+export interface Poll {
+  id: string;
+  building_id: string;
+  title: string;
+  description?: string | null;
+  category: string;
+  estimated_cost?: number;
+  share_per_unit?: number;
+  status: 'active' | 'closed' | 'cancelled';
+  votes_count: number;
+  quorum_percent: number;
+  options: any[];
+  ends_at: string;
+  created_at: string;
+}
+

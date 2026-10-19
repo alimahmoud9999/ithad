@@ -93,6 +93,8 @@ export const RootNavigator: React.FC = () => {
           <AdminDashboardScreen
             onNavigateExpenses={() => setActiveTab('expenses')}
             onNavigateSettings={() => setActiveTab('settings')}
+            onNavigateUnits={() => setActiveTab('units')}
+            onNavigateCommunity={() => setActiveTab('community')}
           />
         );
     }

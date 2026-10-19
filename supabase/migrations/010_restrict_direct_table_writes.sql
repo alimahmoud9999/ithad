@@ -19,6 +19,63 @@
 -- ============================================================================
 
 -- ============================================================================
+-- 0. Schema Resilience: Ensure columns and tables exist
+-- ============================================================================
+-- Ensure poll and vote enhancements exist
+ALTER TABLE public.poll_votes ADD COLUMN IF NOT EXISTS apartment_number TEXT;
+ALTER TABLE public.poll_votes ADD COLUMN IF NOT EXISTS voter_name TEXT;
+ALTER TABLE public.polls ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[{"id":"approve","title":"موافق على القرار"},{"id":"reject","title":"رافض أو متحفظ"},{"id":"abstain","title":"ممتنع عن التصويت"}]'::jsonb;
+ALTER TABLE public.polls ADD COLUMN IF NOT EXISTS votes_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.polls ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'عام';
+
+-- Ensure user columns exist
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS push_token TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS push_token_updated_at TIMESTAMPTZ;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS floor_number TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS residency_type TEXT NOT NULL DEFAULT 'owner_resident';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS ownership_share_percent NUMERIC(5, 2) DEFAULT 6.25;
+
+-- Ensure expense columns exist
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS expense_month TEXT NOT NULL DEFAULT to_char(CURRENT_DATE, 'YYYY-MM');
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS invoice_image_url TEXT;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS invoice_number TEXT;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS voucher_number TEXT;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS is_system_generated BOOLEAN NOT NULL DEFAULT false;
+
+-- Ensure building_issues and issue_upvotes exist if migration 007 was skipped or partial
+CREATE TABLE IF NOT EXISTS public.building_issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    building_id UUID NOT NULL REFERENCES public.buildings(id) ON DELETE CASCADE,
+    created_by UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    apartment_id UUID REFERENCES public.apartments(id) ON DELETE SET NULL,
+    apartment_number TEXT,
+    reporter_name TEXT,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL DEFAULT 'المصعد',
+    severity TEXT NOT NULL DEFAULT 'medium',
+    image_url TEXT,
+    is_private BOOLEAN NOT NULL DEFAULT false,
+    upvotes_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'open',
+    preferred_time TEXT DEFAULT 'any',
+    whatsapp_notifications BOOLEAN NOT NULL DEFAULT true,
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.issue_upvotes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    issue_id UUID NOT NULL REFERENCES public.building_issues(id) ON DELETE CASCADE,
+    building_id UUID NOT NULL REFERENCES public.buildings(id) ON DELETE CASCADE,
+    apartment_id UUID REFERENCES public.apartments(id) ON DELETE CASCADE,
+    apartment_number TEXT NOT NULL,
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================================
 -- 1. Restrict poll_votes & Harden cast_poll_vote RPC
 -- ============================================================================
 DROP POLICY IF EXISTS "poll_votes_insert_resident" ON public.poll_votes;
@@ -374,13 +431,21 @@ DROP POLICY IF EXISTS "payments_update_policy" ON public.payments;
 REVOKE INSERT, UPDATE, DELETE ON public.payments FROM PUBLIC, anon;
 
 -- Partial unique indexes preventing concurrent duplicate pending requests
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_pending_monthly_dues
-ON public.payments (building_id, apartment_id, billing_month)
-WHERE status = 'pending' AND payment_category = 'monthly_dues';
+DO $$ BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_pending_monthly_dues
+    ON public.payments (building_id, apartment_id, billing_month)
+    WHERE status = 'pending' AND payment_category = 'monthly_dues';
+EXCEPTION WHEN unique_violation THEN
+    RAISE NOTICE 'Skipping index uq_payments_pending_monthly_dues due to existing duplicate records.';
+END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_pending_emergency_claim
-ON public.payments (building_id, apartment_id, emergency_claim_id)
-WHERE status = 'pending' AND payment_category = 'emergency_claim';
+DO $$ BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_pending_emergency_claim
+    ON public.payments (building_id, apartment_id, emergency_claim_id)
+    WHERE status = 'pending' AND payment_category = 'emergency_claim';
+EXCEPTION WHEN unique_violation THEN
+    RAISE NOTICE 'Skipping index uq_payments_pending_emergency_claim due to existing duplicate records.';
+END $$;
 
 -- ============================================================================
 -- 6. Restrict expenses Direct Writes & Create/Enforce Atomic RPC
@@ -544,8 +609,12 @@ GRANT EXECUTE ON FUNCTION public.create_expense(text, numeric, text, text, date,
 DROP POLICY IF EXISTS "apartments_manage_admin" ON public.apartments;
 
 -- Prevent duplicate apartment unit numbers within the same building
-CREATE UNIQUE INDEX IF NOT EXISTS uq_apartments_building_unit 
-ON public.apartments (building_id, trim(apartment_number));
+DO $$ BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_apartments_building_unit 
+    ON public.apartments (building_id, trim(apartment_number));
+EXCEPTION WHEN unique_violation THEN
+    RAISE NOTICE 'Skipping index uq_apartments_building_unit due to existing duplicate records.';
+END $$;
 
 -- Disciplined INSERT: Only active building admin within building limits
 CREATE POLICY "apartments_insert_admin"

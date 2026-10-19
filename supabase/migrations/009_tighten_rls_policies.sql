@@ -133,6 +133,11 @@ GRANT SELECT ON public.building_apartments_directory TO authenticated;
 -- ============================================================================
 -- 4. Tighten RLS: public.notifications
 -- ============================================================================
+-- Ensure notifications table supports broadcast recipient_role and metadata
+ALTER TABLE public.notifications ALTER COLUMN recipient_id DROP NOT NULL;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS recipient_role TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
 DROP POLICY IF EXISTS "notifications_select_policy" ON public.notifications;
 DROP POLICY IF EXISTS "notifications_select_own" ON public.notifications;
 DROP POLICY IF EXISTS "notifications_update_own" ON public.notifications;

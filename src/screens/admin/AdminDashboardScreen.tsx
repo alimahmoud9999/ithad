@@ -47,6 +47,8 @@ export type ClaimDistChoice = 'occupied_only' | 'equal' | 'custom';
 interface AdminDashboardScreenProps {
   onNavigateExpenses: () => void;
   onNavigateSettings?: () => void;
+  onNavigateUnits?: () => void;
+  onNavigateCommunity?: () => void;
 }
 
 /**
@@ -60,16 +62,21 @@ interface AdminDashboardScreenProps {
 export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   onNavigateExpenses,
   onNavigateSettings,
+  onNavigateUnits,
+  onNavigateCommunity,
 }) => {
   const {
     currentUser,
     currentBuilding,
     apartments,
+    apartmentObligations,
     pendingResidents,
     payments,
     emergencyClaims,
     expenses,
     plans,
+    buildingIssues,
+    polls,
     processingIds,
     isCurrentBuildingWritable,
     reviewResidentJoinRequest,
@@ -82,6 +89,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
     submitAppSubscriptionInvoice,
     sendBulkUnpaidReminder,
     sendIndividualUnpaidReminder,
+    resetBuildingData,
   } = useAppStore();
 
   // Modals State
@@ -148,6 +156,14 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   const [subUploadingImage, setSubUploadingImage] = useState(false);
   const [subCompressedUpload, setSubCompressedUpload] =
     useState<CompressedUploadResult | null>(null);
+
+  // Testing & Reset Tools state
+  const [resettingMode, setResettingMode] = useState<
+    'residents_only' | 'full_delete' | null
+  >(null);
+  const [directCashRecordingAptId, setDirectCashRecordingAptId] = useState<
+    string | null
+  >(null);
 
   const currentCycleLabel = useMemo(() => {
     try {
@@ -515,6 +531,115 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
     }
   };
 
+  const totalArrearsAmount = useMemo(() => {
+    return unpaidApartments.reduce(
+      (sum, apt) =>
+        sum + (apt.unpaid_amount || currentBuilding.default_monthly_dues),
+      0
+    );
+  }, [unpaidApartments, currentBuilding.default_monthly_dues]);
+
+  const activeIssuesCount = useMemo(() => {
+    return buildingIssues.filter((i) => i.status !== 'resolved').length;
+  }, [buildingIssues]);
+
+  const activePollsCount = useMemo(() => {
+    return polls.filter((p) => p.status === 'active').length;
+  }, [polls]);
+
+  const handleDirectCashForDefaulter = (apt: Apartment) => {
+    const dues = apt.unpaid_amount || currentBuilding.default_monthly_dues || 0;
+    Alert.alert(
+      'تسجيل سداد نقدي (كاش) 💵',
+      `هل استلمت مبلغ ${dues.toLocaleString()} ج.م نقداً من شقة (${apt.apartment_number}) - ${apt.resident_name || apt.occupant_name || 'الساكن'}؟\n\nسيتم تحديث حالة الشقة إلى مسدد فوراً وإضافة المبلغ لخزينة العمارة.`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'تأكيد واستلام المبلغ',
+          onPress: async () => {
+            setDirectCashRecordingAptId(apt.id);
+            try {
+              await recordDirectCashPayment({
+                apartmentId: apt.id,
+                apartmentNumber: apt.apartment_number,
+                residentId: apt.resident_id,
+                residentName: apt.resident_name || apt.occupant_name,
+                amount: dues,
+                category: 'monthly_dues',
+                billingMonth: new Date().toISOString().slice(0, 7),
+                notes: 'سداد نقدي مباشر من قائمة المتأخرات',
+              });
+              Alert.alert(
+                'تم بنجاح ✅',
+                `تم اعتماد سداد شقة (${apt.apartment_number}) وإضافته للخزينة.`
+              );
+            } catch (err: any) {
+              Alert.alert('تنبيه', err?.message || 'تعذر تسجيل السداد');
+            } finally {
+              setDirectCashRecordingAptId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleResetResidentsOnly = () => {
+    Alert.alert(
+      'تصفير العمارة ومسح بيانات السكان ⚠️',
+      `هل أنت متأكد من مسح جميع الشقق، مديونيات السكان، طلبات الانضمام، المدفوعات، والمصروفات؟\n\nستصبح العمارة (${currentBuilding.name}) فارغة تماماً برصيد خزينة 0 ج.م مع الإبقاء على حساب رئيس الاتحاد (${currentUser.full_name}) لتتمكن من تجربة تسجيل الشقق والمديونيات من جديد فوراً.`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'نعم، تصفير العمارة الآن',
+          style: 'destructive',
+          onPress: async () => {
+            setResettingMode('residents_only');
+            try {
+              await resetBuildingData('residents_only');
+              Alert.alert(
+                'تم تصفير العمارة بنجاح ✅',
+                'أصبحت العمارة الآن فارغة تماماً. يمكنك البدء فوراً في تجربة إضافة الشقق والمديونيات مجدداً.'
+              );
+            } catch (err: any) {
+              Alert.alert('خطأ', err?.message || 'تعذر تصفير بيانات العمارة');
+            } finally {
+              setResettingMode(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleFullDeleteBuilding = () => {
+    Alert.alert(
+      'حذف العمارة بالكامل وإعادة البدء 🛑',
+      `تحذير نهائي: سيتم حذف عمارة (${currentBuilding.name}) بالكامل من قاعدة البيانات مع كافة سجلاتها وحساب رئيس الاتحاد (${currentUser.full_name}).\n\nسيتم تسجيل خروجك لتبدأ تجربة التطبيق كأنك تسجل عقاراً جديداً لأول مرة.\n\nهل ترغب في المتابعة؟`,
+      [
+        { text: 'تراجع', style: 'cancel' },
+        {
+          text: 'تأكيد الحذف الشامل والخروج',
+          style: 'destructive',
+          onPress: async () => {
+            setResettingMode('full_delete');
+            try {
+              await resetBuildingData('full_delete');
+              Alert.alert(
+                'تم حذف العمارة بالكامل ✅',
+                'تم حذف العقار وكافة السجلات وحساب المدير. يمكنك الآن البدء من جديد.'
+              );
+            } catch (err: any) {
+              Alert.alert('خطأ', err?.message || 'تعذر حذف العمارة');
+            } finally {
+              setResettingMode(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -739,6 +864,118 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
             <MaterialIcons name="add" size={24} color="#FFFFFF" />
           </View>
         </TouchableOpacity>
+      </View>
+
+      {/* Quick Navigation Hub (أقسام الإدارة والخدمات السريعة) */}
+      <View style={styles.quickNavSection}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>أقسام الإدارة والخدمات السريعة</Text>
+          <Text style={styles.sectionSubCount}>
+            {buildingApartments.length} شقة مسجلة
+          </Text>
+        </View>
+
+        <View style={styles.quickNavGrid}>
+          {/* Card 1: Units & Obligations */}
+          <TouchableOpacity
+            style={styles.quickNavCard}
+            onPress={onNavigateUnits}
+            activeOpacity={0.7}
+          >
+            <View style={styles.quickNavIconBox}>
+              <MaterialIcons
+                name="meeting-room"
+                size={22}
+                color={COLORS.primary}
+              />
+            </View>
+            <Text style={styles.quickNavCardTitle}>الوحدات والمديونيات</Text>
+            <Text style={styles.quickNavCardSub}>
+              {unpaidApartments.length > 0
+                ? `${unpaidApartments.length} شقة عليها متأخرات`
+                : 'جميع الشقق مسددة'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Card 2: Treasury & Expenses */}
+          <TouchableOpacity
+            style={styles.quickNavCard}
+            onPress={onNavigateExpenses}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.quickNavIconBox,
+                { backgroundColor: 'rgba(0, 108, 73, 0.1)' },
+              ]}
+            >
+              <MaterialIcons
+                name="account-balance-wallet"
+                size={22}
+                color={COLORS.secondary}
+              />
+            </View>
+            <Text style={styles.quickNavCardTitle}>الخزينة والمصروفات</Text>
+            <Text style={styles.quickNavCardSub}>
+              رصيد {currentBuilding.fund_balance.toLocaleString()} ج.م
+            </Text>
+          </TouchableOpacity>
+
+          {/* Card 3: Community Hub */}
+          <TouchableOpacity
+            style={styles.quickNavCard}
+            onPress={onNavigateCommunity}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.quickNavIconBox,
+                { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+              ]}
+            >
+              <MaterialIcons
+                name="how-to-vote"
+                size={22}
+                color="#2563EB"
+              />
+            </View>
+            <Text style={styles.quickNavCardTitle}>مجتمع العمارة</Text>
+            <Text style={styles.quickNavCardSub}>
+              {activeIssuesCount > 0
+                ? `${activeIssuesCount} بلاغ صيانة نشط`
+                : 'لا توجد بلاغات معلقة'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Card 4: WhatsApp Invite */}
+          <TouchableOpacity
+            style={styles.quickNavCard}
+            onPress={() =>
+              sendWhatsAppInvite({
+                buildingName: currentBuilding.name,
+                buildingCode: currentBuilding.building_code,
+              })
+            }
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.quickNavIconBox,
+                { backgroundColor: 'rgba(37, 211, 102, 0.1)' },
+              ]}
+            >
+              <MaterialIcons
+                name="share"
+                size={22}
+                color="#25D366"
+              />
+            </View>
+            <Text style={styles.quickNavCardTitle}>دعوة السكان (واتساب)</Text>
+            <Text style={styles.quickNavCardSub}>
+              كود: {currentBuilding.building_code}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* 4. Pending Resident Join Requests + Mechanism 2: Smart Comparison Card & Change Apartment Before Approval */}
@@ -1363,12 +1600,18 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
             const claimObj = payment.emergency_claim_id
               ? emergencyClaims.find((c) => c.id === payment.emergency_claim_id)
               : null;
+            const matchObl = payment.notes?.match(/\[سداد بند:\s*(.*?)(?:\s*#|\s*\])/);
+            const isArrearsPay = payment.notes?.includes('مديونية');
             const paymentInfoLabel =
               payment.payment_category === 'emergency_claim'
                 ? claimObj
                   ? `طوارئ: ${claimObj.title}`
                   : 'مساهمة طوارئ'
-                : payment.billing_month;
+                : matchObl
+                ? `سداد بند: ${matchObl[1]}`
+                : isArrearsPay
+                ? 'سداد مديونية / متأخرات'
+                : `اشتراك شهر ${payment.billing_month}`;
 
             return (
               <View key={payment.id} style={styles.reviewCard}>
@@ -1396,10 +1639,37 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
                                 }`}
                           </Text>
                         </View>
-                        <Text style={styles.paymentTimeText}>
-                          {paymentInfoLabel}
-                        </Text>
+                        <View
+                          style={[
+                            styles.methodPill,
+                            matchObl
+                              ? { backgroundColor: '#FEF3C7' }
+                              : isArrearsPay
+                              ? { backgroundColor: '#FEE2E2' }
+                              : { backgroundColor: '#EFF6FF' },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.methodPillText,
+                              matchObl
+                                ? { color: '#B45309', fontWeight: 'bold' }
+                                : isArrearsPay
+                                ? { color: '#DC2626', fontWeight: 'bold' }
+                                : { color: '#1D4ED8' },
+                            ]}
+                          >
+                            {paymentInfoLabel}
+                          </Text>
+                        </View>
                       </View>
+                      {payment.notes ? (
+                        <View style={styles.paymentNotesBadge}>
+                          <Text style={styles.paymentNotesBadgeText}>
+                            📌 {payment.notes}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
 
@@ -1522,96 +1792,269 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
           </View>
         </View>
 
-        {unpaidApartments.map((apt) => (
-          <View key={apt.id} style={styles.defaulterCard}>
-            <View style={styles.reviewTopRow}>
-              <View style={styles.reviewRightGroup}>
-                <View
-                  style={[
-                    styles.aptBadgeBox,
-                    (apt.unpaid_months_count || 1) >= 3 && {
-                      backgroundColor: COLORS.errorContainer,
-                    },
-                  ]}
-                >
-                  <Text
+        {unpaidApartments.map((apt) => {
+          const pendingForApt = payments.filter(
+            (p) =>
+              p.status === 'pending' &&
+              ((p.apartment_id && p.apartment_id === apt.id) ||
+                (p.apartment_number &&
+                  String(p.apartment_number).trim() === String(apt.apartment_number).trim()))
+          );
+          const pendingForAptAmount = pendingForApt.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+          return (
+            <View key={apt.id} style={styles.defaulterCard}>
+              <View style={styles.reviewTopRow}>
+                <View style={styles.reviewRightGroup}>
+                  <View
                     style={[
-                      styles.aptBadgeLabel,
+                      styles.aptBadgeBox,
                       (apt.unpaid_months_count || 1) >= 3 && {
-                        color: COLORS.error,
+                        backgroundColor: COLORS.errorContainer,
                       },
                     ]}
                   >
-                    شقة
-                  </Text>
-                  <Text
-                    style={[
-                      styles.aptBadgeNumber,
-                      (apt.unpaid_months_count || 1) >= 3 && {
-                        color: COLORS.error,
-                      },
-                    ]}
-                  >
-                    {apt.apartment_number}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.aptBadgeLabel,
+                        (apt.unpaid_months_count || 1) >= 3 && {
+                          color: COLORS.error,
+                        },
+                      ]}
+                    >
+                      شقة
+                    </Text>
+                    <Text
+                      style={[
+                        styles.aptBadgeNumber,
+                        (apt.unpaid_months_count || 1) >= 3 && {
+                          color: COLORS.error,
+                        },
+                      ]}
+                    >
+                      {apt.apartment_number}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.residentNameText}>
+                      {apt.resident_name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.delaySubText,
+                        {
+                          color:
+                            (apt.unpaid_months_count || 1) >= 2 || Number(apt.arrears_amount || 0) > 0
+                              ? COLORS.statusUnpaid
+                              : COLORS.statusPending,
+                        },
+                      ]}
+                    >
+                      {(apt.unpaid_months_count || 1) >= 2
+                        ? `متأخر ${apt.unpaid_months_count} أشهر`
+                        : Number(apt.arrears_amount || 0) > 0
+                        ? `متأخرات: ${(Number(apt.arrears_amount) || 0).toLocaleString()} ج.م`
+                        : 'اشتراك الشهر الحالي'}
+                    </Text>
+                    {pendingForAptAmount > 0 && (
+                      <View style={{ flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                        <MaterialIcons name="hourglass-top" size={12} color="#B45309" />
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>
+                          طلب سداد قيد المراجعة: {pendingForAptAmount.toLocaleString()} ج.م ⏳
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={styles.residentNameText}>
-                    {apt.resident_name}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.delaySubText,
-                      {
-                        color:
-                          (apt.unpaid_months_count || 1) >= 2
-                            ? COLORS.statusUnpaid
-                            : COLORS.statusPending,
-                      },
-                    ]}
-                  >
-                    متأخر {apt.unpaid_months_count || 1} شهر
-                  </Text>
-                </View>
+
+                <Text style={styles.defaulterAmount}>
+                  {(apt.unpaid_amount || currentBuilding.default_monthly_dues || 400).toLocaleString()} ج.م
+                </Text>
               </View>
 
-              <Text style={styles.defaulterAmount}>
-                {(apt.unpaid_amount || 400).toLocaleString()} ج.م
-              </Text>
-            </View>
+              <View style={styles.defaulterActionsRow}>
+                {pendingForApt.length > 0 ? (
+                  <TouchableOpacity
+                    style={[styles.manualConfirmBtn, { backgroundColor: '#059669', borderColor: '#059669' }]}
+                    onPress={() => handleApprovePayment(pendingForApt[0].id)}
+                  >
+                    <MaterialIcons name="check-circle" size={16} color="#FFFFFF" />
+                    <Text style={[styles.manualConfirmText, { color: '#FFFFFF' }]}>
+                      اعتماد ({pendingForApt[0].amount} ج.م)
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={styles.whatsappRemindBtn}
+                      onPress={() => handleIndividualReminder(apt)}
+                    >
+                      <MaterialIcons
+                        name="notifications"
+                        size={16}
+                        color={COLORS.onSurface}
+                      />
+                      <Text style={styles.whatsappRemindText}>إرسال تذكير</Text>
+                    </TouchableOpacity>
 
-            <View style={styles.defaulterActionsRow}>
-              <TouchableOpacity
-                style={styles.whatsappRemindBtn}
-                onPress={() => handleIndividualReminder(apt)}
-              >
-                <MaterialIcons
-                  name="notifications"
-                  size={16}
-                  color={COLORS.onSurface}
-                />
-                <Text style={styles.whatsappRemindText}>إرسال تذكير</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.manualConfirmBtn}
-                onPress={() =>
-                  Alert.alert(
-                    'تأكيد يدوي',
-                    `لتسجيل السداد النقدي لشقة ${apt.apartment_number}، يمكنك اعتماده من طلبات السداد أو سجل الخزينة.`
-                  )
-                }
-              >
-                <MaterialIcons
-                  name="edit-note"
-                  size={18}
-                  color={COLORS.primary}
-                />
-                <Text style={styles.manualConfirmText}>تأكيد يدوي</Text>
-              </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.manualConfirmBtn}
+                      onPress={() => handleDirectCashForDefaulter(apt)}
+                      disabled={directCashRecordingAptId === apt.id}
+                    >
+                      {directCashRecordingAptId === apt.id ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <>
+                          <MaterialIcons
+                            name="payments"
+                            size={18}
+                            color={COLORS.primary}
+                          />
+                          <Text style={styles.manualConfirmText}>تسجيل كاش</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
             </View>
+          );
+        })}
+      </View>
+
+      {/* 7. Building Pulse & Community Overview (نبض العمارة والنشاط العام) */}
+      <View style={styles.pulseSection}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>نبض العمارة والنشاط العام 📊</Text>
+          <View style={styles.badgeMuted}>
+            <Text style={styles.badgeMutedText}>إحصائيات فورية</Text>
           </View>
-        ))}
+        </View>
+
+        <View style={styles.pulseGrid}>
+          {/* Col 1: Occupancy */}
+          <View style={styles.pulseCol}>
+            <View style={styles.pulseColIconRow}>
+              <MaterialIcons
+                name="people-outline"
+                size={18}
+                color={COLORS.primary}
+              />
+              <Text style={styles.pulseColTitle}>نسبة الإشغال</Text>
+            </View>
+            <Text style={styles.pulseColNumber}>
+              {occupiedApartments.length}/{currentBuilding.total_apartments}
+            </Text>
+            <Text style={styles.pulseColSub}>
+              {currentBuilding.total_apartments - occupiedApartments.length > 0
+                ? `${currentBuilding.total_apartments - occupiedApartments.length} شقة شاغرة`
+                : 'العمارة مأهولة بالكامل'}
+            </Text>
+          </View>
+
+          {/* Col 2: Total Arrears */}
+          <View style={styles.pulseCol}>
+            <View style={styles.pulseColIconRow}>
+              <MaterialIcons
+                name="warning-amber"
+                size={18}
+                color={COLORS.statusUnpaidText}
+              />
+              <Text style={styles.pulseColTitle}>إجمالي المتأخرات</Text>
+            </View>
+            <Text
+              style={[
+                styles.pulseColNumber,
+                { color: COLORS.statusUnpaidText },
+              ]}
+            >
+              {totalArrearsAmount.toLocaleString()} ج.م
+            </Text>
+            <Text style={styles.pulseColSub}>
+              {unpaidApartments.length} شقة غير مسددة
+            </Text>
+          </View>
+        </View>
+
+        {/* Community Hub Status Row */}
+        <View style={styles.communityPulseBox}>
+          <View style={{ flex: 1, alignItems: 'flex-end', gap: 2 }}>
+            <Text style={styles.communityPulseText}>
+              مجتمع العمارة: {activeIssuesCount} بلاغ صيانة مفتوح • {activePollsCount} استطلاع نشط
+            </Text>
+            <Text style={{ fontSize: 11, color: '#15803D' }}>
+              متابعة الشكاوى والتصويت على قرارات الجمعية العمومية
+            </Text>
+          </View>
+          {onNavigateCommunity && (
+            <TouchableOpacity
+              style={styles.communityPulseBtn}
+              onPress={onNavigateCommunity}
+            >
+              <Text style={styles.communityPulseBtnText}>عرض المجتمع</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* 8. Developer & Testing Reset Tools Card (أدوات التجربة السريعة والتصفير) */}
+      <View style={styles.testingCard}>
+        <View style={styles.testingHeaderRow}>
+          <MaterialIcons name="science" size={24} color="#B45309" />
+          <View style={{ flex: 1, alignItems: 'flex-end' }}>
+            <Text style={styles.testingTitle}>
+              أدوات التجربة السريعة والتصفير 🧪
+            </Text>
+            <Text style={styles.testingSubtitle}>
+              مخصصة لتسريع الاختبار وحذف وإعادة كتابة البيانات دون فتح قاعدة البيانات يدوياً
+            </Text>
+          </View>
+        </View>
+
+        {/* Action 1: Clear Residents and Operations */}
+        <TouchableOpacity
+          style={styles.testingActionBtnAmber}
+          onPress={handleResetResidentsOnly}
+          disabled={resettingMode !== null}
+          activeOpacity={0.8}
+        >
+          <View style={styles.testingActionTop}>
+            {resettingMode === 'residents_only' ? (
+              <ActivityIndicator size="small" color="#B45309" />
+            ) : (
+              <MaterialIcons name="cleaning-services" size={20} color="#B45309" />
+            )}
+            <Text style={styles.testingActionTitleAmber}>
+              مسح بيانات السكان والعمليات (تصفير العمارة)
+            </Text>
+          </View>
+          <Text style={styles.testingActionDesc}>
+            مسح كافة الشقق، المديونيات، طلبات الانضمام، المدفوعات، والمصروفات، مع تصفير رصيد الخزينة والإبقاء على حساب رئيس الاتحاد والعمارة لتجربة تسجيل الشقق والمديونيات من جديد فوراً.
+          </Text>
+        </TouchableOpacity>
+
+        {/* Action 2: Cascade Delete Building & Admin */}
+        <TouchableOpacity
+          style={styles.testingActionBtnRed}
+          onPress={handleFullDeleteBuilding}
+          disabled={resettingMode !== null}
+          activeOpacity={0.8}
+        >
+          <View style={styles.testingActionTop}>
+            {resettingMode === 'full_delete' ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <MaterialIcons name="delete-forever" size={20} color="#DC2626" />
+            )}
+            <Text style={styles.testingActionTitleRed}>
+              حذف العمارة بالكامل وإعادة البدء من الصفر
+            </Text>
+          </View>
+          <Text style={styles.testingActionDesc}>
+            حذف العقار بالكامل من قاعدة البيانات مع كافة سجلاته وحساب رئيس الاتحاد وتسجيل الخروج للبدء من صفحة التسجيل والتهيئة كأنك تستخدم التطبيق لأول مرة.
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* ==================================================================== */}
@@ -4287,5 +4730,212 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.primary,
+  },
+  sectionSubCount: {
+    fontSize: 12,
+    color: COLORS.onSurfaceVariant,
+    fontWeight: '600',
+  },
+  badgeMuted: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: COLORS.surfaceContainerHigh,
+  },
+  badgeMutedText: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+    fontWeight: '600',
+  },
+
+  // Building Pulse & Overview
+  pulseSection: {
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    padding: 16,
+    marginBottom: 16,
+    gap: 12,
+  },
+  pulseGrid: {
+    flexDirection: 'row-reverse',
+    gap: 10,
+  },
+  pulseCol: {
+    flex: 1,
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  pulseColIconRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  pulseColTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+  pulseColNumber: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  pulseColSub: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+  },
+  communityPulseBox: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  communityPulseText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  communityPulseBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#166534',
+  },
+  communityPulseBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  // Quick Navigation Hub
+  quickNavSection: {
+    marginBottom: 16,
+  },
+  quickNavGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 10,
+  },
+  quickNavCard: {
+    width: '48.5%',
+    backgroundColor: COLORS.surfaceCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  quickNavIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surfaceContainer,
+  },
+  quickNavCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    textAlign: 'right',
+  },
+  quickNavCardSub: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+    textAlign: 'right',
+  },
+
+  // Developer & Testing Reset Section
+  testingCard: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1.5,
+    borderColor: '#FDE68A',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 24,
+    gap: 12,
+  },
+  testingHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  testingTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  testingSubtitle: {
+    fontSize: 12,
+    color: '#B45309',
+    textAlign: 'right',
+    lineHeight: 18,
+  },
+  testingActionBtnAmber: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+  },
+  testingActionBtnRed: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+  },
+  testingActionTop: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  testingActionTitleAmber: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  testingActionTitleRed: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  testingActionDesc: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+    textAlign: 'right',
+    lineHeight: 16,
+  },
+  paymentNotesBadge: {
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  paymentNotesBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
+    textAlign: 'right',
   },
 });
