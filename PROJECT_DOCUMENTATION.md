@@ -203,26 +203,238 @@
 
 ---
 
-## 🗄️ 6. قاعدة البيانات والأمان في Supabase (SQL Migrations)
+## 🗄️ 6. قاعدة البيانات والأمان في Supabase (SQL Migrations & Architecture)
 
-تم تقسيم قاعدة البيانات في مجلد `supabase/migrations/` إلى **7 ملفات SQL مرتبة منطقياً** لضمان سهولة التنفيذ والصيانة:
+تم تقسيم وتأمين قاعدة البيانات في مجلد `supabase/migrations/` إلى **11 ملف تهجير SQL مرتباً زمنياً ومنطقياً** مع الالتزام الصارم بقواعد عدم تعديل الملفات القديمة `001..007` وتطبيق كافة التحسينات والترقيعات الأمنية في ملفات جديدة مرقمة (`008`, `009`, `010`, `011`):
 
-1. **[001_enums_and_core_tables.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/001_enums_and_core_tables.sql):**
-   * ينشئ جميع الأنواع (`ENUMs`) والجداول الأساسية الـ 4: `subscription_plans` (الباقات)، `buildings` (العمارات)، `apartments` (الشقق)، و `users` (المستخدمين).
-2. **[002_financial_and_operations_tables.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/002_financial_and_operations_tables.sql):**
-   * ينشئ الجداول المالية والتشغيلية الـ 10: `emergency_claims` (المطالبات الطارئة)، `emergency_claim_shares` (أنصبة الشقق في الطوارئ)، `payments` (المدفوعات)، `app_subscription_invoices` (فواتير اشتراك التطبيق)، `expenses` (المصروفات)، `maintenance_tickets` (بلاغات الصيانة)، `polls` & `poll_votes` (التصويت)، `building_documents` (الأرشيف)، و `notifications` (الإشعارات).
-3. **[003_relationships_indexes_and_triggers.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/003_relationships_indexes_and_triggers.sql):**
+### 📑 6.1 فهرس ملفات الـ Migrations (من 001 إلى 011)
+
+1. **[001_enums_and_core_tables.sql](supabase/migrations/001_enums_and_core_tables.sql):**
+   * ينشئ جميع الأنواع (`ENUMs`) والجداول الأساسية الـ 4: `subscription_plans` (الباقات)، `buildings` (العمارات)، `apartments` (الشقق)، و `users` (المستخدمين)، وأعمدة الـ push_token والتواصل.
+2. **[002_financial_and_operations_tables.sql](supabase/migrations/002_financial_and_operations_tables.sql):**
+   * ينشئ الجداول المالية والتشغيلية: `emergency_claims` (المطالبات الطارئة)، `emergency_claim_shares` (أنصبة الشقق في الطوارئ)، `payments` (المدفوعات)، `app_subscription_invoices` (فواتير اشتراك التطبيق)، `expenses` (المصروفات)، `maintenance_tickets` (بلاغات الصيانة - أُلغي لاحقاً في 011 واستُبدل بـ building_issues)، `polls` & `poll_votes` (التصويت)، `building_documents` (الأرشيف)، `notifications` (الإشعارات)، و `apartment_obligations` (سجل المديونيات).
+3. **[003_relationships_indexes_and_triggers.sql](supabase/migrations/003_relationships_indexes_and_triggers.sql):**
    * ينشئ الفهارس (`Indexes`) لتسريع الاستعلامات، و**حراس الأمان (Triggers)**:
      * `trg_protect_user_sensitive_columns`: يمنع أي مستخدم من تعديل عمود `role` لترقية نفسه إلى `admin` أو `super_admin`.
      * `trg_protect_building_sensitive_columns`: يمنع تعديل رصيد الصندوق `fund_balance` يدوياً من خارج دوال الـ RPC المحاسبية.
-4. **[004_rls_and_storage_policies.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/004_rls_and_storage_policies.sql):**
-   * يفعل سياسات أمان الصفوف (`Row Level Security`) على جميع الجداول الـ 14 بحيث لا يرى الساكن أو المدير إلا بيانات عمارته فقط، وينشئ سلات تخزين الصور (`Storage Buckets`) للإيصالات والفواتير.
-5. **[005_rpc_functions.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/005_rpc_functions.sql):**
-   * يحتوي على 11 دالة برمجية محمية (`Secure RPCs`) تعتمد حصرياً على `auth.uid()` وتستخدم قفل الصفوف `SELECT ... FOR UPDATE` لمنع تكرار العمليات المالية (`Idempotency`).
-6. **[006_seed_plans.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/006_seed_plans.sql):**
+4. **[004_rls_and_storage_policies.sql](supabase/migrations/004_rls_and_storage_policies.sql):**
+   * يفعل سياسات أمان الصفوف (`Row Level Security`) وسلات تخزين الصور (`Storage Buckets`) للإيصالات والفواتير والمستندات.
+5. **[005_rpc_functions.sql](supabase/migrations/005_rpc_functions.sql):**
+   * يحتوي على النواة الأولى لدوال الـ RPC المحمية (`Secure RPCs`) وقفل الصفوف `SELECT ... FOR UPDATE` لإدارة المدفوعات والشقق والاشتراكات.
+6. **[006_seed_plans.sql](supabase/migrations/006_seed_plans.sql):**
    * يضيف البيانات الافتراضية لباقات التطبيق الثلاث (`الباقة الأساسية المجانية`، `الباقة الاحترافية Pro`، و `باقة التميز Plus`).
-7. **[007_community_hub_issues_and_polls.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/007_community_hub_issues_and_polls.sql):**
-   * ينشئ جدولي `building_issues` و `issue_upvotes` (صوت تأييد واحد لكل شقة)، ويحدث `polls` و `poll_votes`، ويفعل bucket التخزين `issue-attachments` مع دوال الـ RPC الخمس: `create_building_issue`، `toggle_issue_upvote`، `update_issue_status`، `create_building_poll`، و `cast_poll_vote`.
+7. **[007_community_hub_issues_and_polls.sql](supabase/migrations/007_community_hub_issues_and_polls.sql):**
+   * ينشئ جدولي `building_issues` و `issue_upvotes` (صوت تأييد واحد لكل شقة)، ويحدث `polls` و `poll_votes`، ويفعل bucket التخزين `issue-attachments` مع دوال الـ RPC الخمس لمجتمع العمارة.
+8. **[008_security_patch_impersonation_rpcs.sql](supabase/migrations/008_security_patch_impersonation_rpcs.sql):**
+   * ترقيع الثغرات الأمنية في الدوال الخمس المنتحلة (`review_resident_join_request`, `approve_resident_payment`, `reject_resident_payment`, `submit_resident_payment`, `create_emergency_claim`, `create_building_poll`):
+     - اعتماد هوية المنفّذ حصرياً على `auth.uid()`.
+     - شطب كافة باراميترات الهوية (`p_admin_id`, `p_resident_id`, `p_building_id`) ومنع أي fallback يبحث عن عمارة أو مدير بديل.
+     - إضافة عمود `emergency_claims.contributors_count INTEGER NOT NULL DEFAULT 0`.
+     - التحقق الصارم من سريان اشتراك العمارة (`is_building_writable`)، قفل `FOR UPDATE`، تدقيق صيغ التاريخ (`YYYY-MM`) ومسار السلات.
+     - سحب صلاحيات التنفيذ من العموم (`REVOKE EXECUTE ... FROM PUBLIC, anon`) ومنحها لـ `authenticated`.
+9. **[009_tighten_rls_policies.sql](supabase/migrations/009_tighten_rls_policies.sql):**
+   * إغلاق سياسات RLS المفتوحة وحماية البيانات الحساسة:
+     - تطهير سياسات `users`, `buildings`, `apartments`, `notifications` وحذف أي سياسة `TO anon` أو `USING (true)`.
+     - إنشاء Secure View `public.building_resident_directory` لسكان العمارة دون كشف الـ `push_token` أو `email` أو `phone`.
+     - حظر القراءة العامة لكود المبنى `building_code` وتأمين دالة `lookup_building_apartments_for_join` باشتراط `auth.uid()` وتقنيع الأسماء.
+     - إنشاء Secure View `public.building_apartments_directory` لحجب `occupant_phone` و `arrears_amount` عن غير المالك والمدير.
+     - تقييد تعديل الإشعارات لعمود `is_read` فقط عبر Trigger `trg_restrict_notification_updates`.
+     - قصر قراءة سلة `payment-receipts` على صاحب الإيصال والمدير والـ super_admin.
+     - عزل وتأمين اشتراكات `supabase_realtime` بجمل مستقلة ومحمية لكل جدول.
+10. **[010_restrict_direct_table_writes.sql](supabase/migrations/010_restrict_direct_table_writes.sql):**
+    * حظر الكتابة والتعديل المباشر على الجداول الحساسة:
+      - حظر INSERT المباشر على `poll_votes` وإلزامه بـ `cast_poll_vote` مع تدقيق الخيارات والأوزان وتوثيق إغلاق الصوت بعد الموعد النهائي.
+      - حظر تعديل الحقول الحساسة في `users` (`role`, `status`, `building_id`, `apartment_id`, `ownership_share_percent`) عبر Trigger صارم.
+      - حظر INSERT المباشر على `issue_upvotes` وإلزامه بـ `toggle_issue_upvote`.
+      - حظر UPDATE المباشر على `building_issues` وتقييد INSERT لشقة الساكن النشط فقط.
+      - سحب INSERT و UPDATE المباشر على `payments` وإضافة Partial Unique Indexes لمنع تكرار طلبات السداد المعلقة المتزامنة.
+      - حظر INSERT المباشر على `expenses` وتأمين رصيد الخزينة ومنع السحب على المكشوف في `record_building_expense`.
+      - إضافة قيد فريد `uq_apartments_building_unit` لمنع تكرار رقم الشقة بالعمارة وفصل صلاحيات الشقق.
+11. **[011_missing_rpcs_and_logic_fixes.sql](supabase/migrations/011_missing_rpcs_and_logic_fixes.sql):**
+    * الدوال المفقودة وضبط العمليات المنطقية ومفاتيح الميزات:
+      - حذف جدول `maintenance_tickets` القديم غير المستخدم واستبداله رسمياً بنظام `building_issues`.
+      - ترقيع `request_join_building`: إزالة split_part، منع انضمام الساكن لعمارة ثانية، والتحقق من حدود الباقة للشقق.
+      - ترقيع `create_building_for_admin`: استخراج البريد بأمان من `auth.jwt()`، منع تعدد عمارات المدير، وترقية الحساب لـ admin وactive.
+      - إضافة دالة `reject_app_subscription_invoice` للسوبر أدمن مع قفل FOR UPDATE وتوثيق سبب الرفض وإشعار المدير.
+      - ترقيع `submit_app_subscription_invoice`: حصر العمارة على عمارة المدير بالـ DB، قفل FOR UPDATE، والتحقق من الإيصال.
+      - ترقيع `send_bulk_unpaid_reminder`: قصر التنفيذ على المدير، فحص مفتاح notifications وسريان الاشتراك، واستهداف المتأخرين فقط.
+      - الإنفاذ الشامل لمفاتيح المميزات (`receipt_upload`, `emergency_claims`, `voting`, `notifications`).
+
+---
+
+### 📊 6.2 المرجع الشامل للجداول الـ 17 (Database Tables Reference)
+
+| # | اسم الجدول | الوصف والغرض الوظيفي | سياسات أمان الصفوف (RLS) | الأعمدة المحمية / الحساسة |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | **`subscription_plans`** | باقات اشتراك التطبيق (مجانية، احترافية، بلس) وحدود الشقق والمميزات | قراءة عامة للـ `authenticated`، تعديل للسوبر أدمن فقط | `monthly_price_egp`, `max_apartments`, `default_features_config` |
+| 2 | **`buildings`** | بيانات العمارات السكنية، الأكواد، الخزينة، وحالة وسريان الاشتراك | قراءة للأعضاء النشطين والسوبر أدمن فقط، وتعديل عبر RPC | `building_code` (محجوب بالـ RPC)، `fund_balance` (ممنوع التعديل اليدوي) |
+| 3 | **`apartments`** | سجل الوحدات والشقق، نسبة المساهمة، وبيانات الشاغل المبدئية | قراءة للأعضاء النشطين، إدارة للمدير، حجب البيانات الحساسة عبر View | `occupant_phone`, `arrears_amount` (محجوبة عن الجيران في View الشقق) |
+| 4 | **`users`** | الملفات الشخصية للمستخدمين، الأدوار، الحالات، والشقق المرتبطة | قراءة لصاحب الحساب ومدير العمارة وsuper_admin، والتعديل مقيد بـ Trigger | `role`, `status`, `building_id`, `apartment_id`, `push_token`, `phone` |
+| 5 | **`emergency_claims`** | مطالبات الصيانة الطارئة وتكاليفها وحالة الجمع | قراءة لأعضاء العمارة النشطين، والإنشاء عبر RPC للمدير | `collected_amount`, `contributors_count`, `target_amount` |
+| 6 | **`emergency_claim_shares`**| أنصبة الشقق المخصصة في كل مطالبة طارئة وحالة سدادها | قراءة لصاحب الشقة ومدير العمارة، وتحديث السداد عبر RPC الاعتماد | `assigned_amount`, `paid_amount`, `status` |
+| 7 | **`payments`** | سجل مدفوعات الاشتراكات والطوارئ وحالات الاعتماد والرفض | قراءة لصاحب الدفعة والمدير، ممنوع INSERT/UPDATE مباشر، حصر على RPC | `status`, `amount`, `receipt_image_url`, `rejection_reason`, `reviewed_by` |
+| 8 | **`app_subscription_invoices`**| فواتير وإيصالات تجديد باقة ترخيص التطبيق للعمارة | قراءة لمدير العمارة وsuper_admin، الإنشاء والاعتماد عبر RPCs فقط | `receipt_image_url`, `status`, `rejection_reason`, `reviewed_by` |
+| 9 | **`expenses`** | قيود المصروفات وسندات الصرف وفواتير المشتريات والخدمات | قراءة لأعضاء العمارة النشطين (شفافية)، ممنوع INSERT مباشر، حصر على RPC | `amount`, `fund_balance` (خصم ذري تلقائي), `invoice_image_url` |
+| 10 | **`maintenance_tickets`** | بلاغات الصيانة القديمة (أُلغي واستُبدل رسمياً بـ `building_issues` في 011) | تم إسقاطه نهائياً في migration 011 لتفادي تكرار الوظائف | جدول تاريخي مسقط |
+| 11 | **`polls`** | استطلاعات وقرارات الجمعية العمومية والنصاب القانوني والخيارات | قراءة لأعضاء العمارة النشطين، الإنشاء عبر RPC للمدير النشط | `voting_basis`, `options`, `quorum_percent`, `ends_at` |
+| 12 | **`poll_votes`** | سجل أصوات الشقق في قرارات الجمعية العمومية | قراءة لأعضاء العمارة، ممنوع INSERT مباشر، التصويت عبر `cast_poll_vote` | `choice`, `voting_weight`, `voted_at` (مغلق بعد ends_at) |
+| 13 | **`building_documents`** | الأرشيف السحابي لمستندات العمارة والعقود الرسمية | قراءة لأعضاء العمارة النشطين، إضافة للمدير | `file_url`, `category`, `uploaded_by` |
+| 14 | **`notifications`** | مركز التنبيهات والإشعارات الفورية والموجهة للأدوار | قراءة للمستلم المحدد أو دوره بعمارته، تعديل عمود `is_read` فقط | كافة الأعمدة محمية بـ Trigger لمنع تعديل العنوان أو المتن |
+| 15 | **`apartment_obligations`**| السجل التفصيلي لالتزامات ومتأخرات الشقة ومديونياتها | قراءة لصاحب الشقة ومدير العمارة، ونقلها محمي بـ RPC ذري | `amount`, `status`, `obligation_type`, `notes` |
+| 16 | **`building_issues`** | بلاغات الأعطال ومقترحات الصيانة ومتابعة الإنجاز والحل | قراءة لأعضاء العمارة (ما لم تكن خاصة)، ممنوع UPDATE مباشر، إضافة مقيدة | `status`, `reporter_id`, `apartment_id`, `severity` |
+| 17 | **`issue_upvotes`** | سجل تأييد الشقق لبلاغات الصيانة (صوت واحد لكل شقة) | قراءة لأعضاء العمارة، ممنوع INSERT مباشر، حصر على `toggle_issue_upvote` | `issue_id`, `apartment_id`, `user_id` |
+
+---
+
+### ⚙️ 6.3 المرجع الشامل لدوال الـ RPC الـ 21 (Callable RPC Reference)
+
+جميع الدوال تعمل بنمط `SECURITY DEFINER` وتطبق `REVOKE ... FROM PUBLIC, anon; GRANT ... TO authenticated;` وتعتمد حصرياً على `auth.uid()`:
+
+1. **`create_building_for_admin`:**
+   - **الباراميترات:** `p_full_name TEXT`, `p_phone TEXT`, `p_building_name TEXT`, `p_address TEXT`, `p_total_apartments INT DEFAULT 16`, `p_default_monthly_dues NUMERIC DEFAULT 300.00`, `p_admin_apartment_number TEXT DEFAULT '1'`, `p_registration_number TEXT DEFAULT NULL`.
+   - **شروط الصلاحية:** مستخدم موثق `auth.uid()` غير مسجل كمدير أو عضو في عمارة أخرى.
+   - **ما تفعله بالترتيب:** قراءة البريد من JWT بأمان، التحقق من عدم إدارة عمارة أخرى، إنشاء العمارة بكود فريد وفترة تجربة 60 يوماً بباقة Pro كاملة، إنشاء شقة الإدارة، وترقية المستخدم ذرياً لـ `admin` نشط.
+
+2. **`request_join_building`:**
+   - **الباراميترات:** `p_full_name TEXT`, `p_phone TEXT`, `p_building_code TEXT`, `p_apartment_number TEXT`, `p_floor_number TEXT DEFAULT NULL`, `p_residency_type TEXT DEFAULT 'owner_resident'`.
+   - **شروط الصلاحية:** مستخدم موثق `auth.uid()` غير منضم لعمارة أخرى نشطة.
+   - **ما تفعله بالترتيب:** البحث عن العمارة بكود المبنى المعتمد، التحقق من عدم تجاوز الحد الأقصى لشقق الباقة، إنشاء أو ربط الشقة، وتسجيل المستخدم بحالة `pending` بانتظار مراجعة المدير.
+
+3. **`review_resident_join_request`:**
+   - **الباراميترات:** `p_resident_user_id UUID`, `p_approve BOOLEAN`, `p_override_apartment_id UUID DEFAULT NULL`, `p_override_apartment_number TEXT DEFAULT NULL`.
+   - **شروط الصلاحية:** مدير نشط (`admin` & `active`) لنفس عمارة الساكن المطلوب، وسريان اشتراك العمارة (`is_building_writable`).
+   - **ما تفعله بالترتيب:** قفل المستخدم والتحقق من حالة `pending`، تحديث الحالة إلى `active` أو `rejected`، نقل الشقة في خطوة واحدة في حال استخدام override، وربط بيانات الشاغل، وإرسال إشعار فوري للساكن.
+
+4. **`lookup_building_apartments_for_join`:**
+   - **الباراميترات:** `p_building_code TEXT`, `p_phone TEXT DEFAULT NULL`.
+   - **شروط الصلاحية:** جلسة موثقة `auth.uid()`.
+   - **ما تفعله بالترتيب:** البحث عن العمارة، إرجاع الشقق وأدوارها مع **تقنيع أسماء الشاغلين** (`أح****`)، حجب الهواتف والمديونيات، وإرجاع مطابقة الهاتف داخل قاعدة البيانات (`is_phone_match: true/false`).
+
+5. **`transfer_apartment_obligations`:**
+   - **الباراميترات:** `p_source_apartment_id UUID`, `p_target_apartment_id UUID`, `p_obligation_ids UUID[] DEFAULT NULL`, `p_transfer_occupant_info BOOLEAN DEFAULT FALSE`.
+   - **شروط الصلاحية:** مدير نشط للعمارة التابع لها الشقتان، وسريان اشتراك العمارة.
+   - **ما تفعله بالترتيب:** قفل الشقتين والالتزامات `FOR UPDATE`، نقل الالتزامات غير المسددة المحددة، نقل بيانات الشاغل المبدئية اختيارياً، وإعادة احتساب رصيد المتأخرات `arrears_amount` للشقتين ذرياً.
+
+6. **`submit_resident_payment`:**
+   - **الباراميترات:** `p_amount NUMERIC`, `p_payment_method payment_method_type`, `p_billing_month TEXT`, `p_cash_recipient cash_recipient_type DEFAULT NULL`, `p_receipt_image_url TEXT DEFAULT NULL`, `p_payment_category payment_category_type DEFAULT 'monthly_dues'`, `p_emergency_claim_id UUID DEFAULT NULL`, `p_reference_number TEXT DEFAULT NULL`, `p_notes TEXT DEFAULT NULL`.
+   - **شروط الصلاحية:** ساكن نشط (`resident` & `active`) في عمارة سارية الاشتراك ومرتبط بشقة.
+   - **ما تفعله بالترتيب:** استخراج العمارة والشقة والاسم من سجل المستخدم بالـ DB حصرياً، تدقيق صيغة الشهر (`YYYY-MM`) ومسار الإيصال ومطابقة المطالبة الطارئة، وإدراج سجل الدفعة بحالة `pending` وإشعار مدير العمارة فوراً.
+
+7. **`approve_resident_payment`:**
+   - **الباراميترات:** `p_payment_id UUID`.
+   - **شروط الصلاحية:** مدير نشط لنفس عمارة الدفعة، وسريان اشتراك العمارة.
+   - **ما تفعله بالترتيب:** قفل الدفعة `FOR UPDATE`، التحقق من حالة `pending` (منع التكرار المزدوج)، تحويل الحالة لـ `paid`، زيادة رصيد خزينة العمارة `fund_balance` بمبلغ الدفعة، تحديث عداد وحصيلة الطوارئ إن وجدت، وإرسال إشعار فوري للساكن.
+
+8. **`reject_resident_payment`:**
+   - **الباراميترات:** `p_payment_id UUID`, `p_rejection_reason TEXT DEFAULT 'بيانات الإيصال غير واضحة أو لم يصل التحويل'`.
+   - **شروط الصلاحية:** مدير نشط لنفس عمارة الدفعة، وسريان اشتراك العمارة.
+   - **ما تفعله بالترتيب:** قفل الدفعة `FOR UPDATE` والتحقق من حالة `pending`، تحويل الحالة إلى `rejected` مع تسجيل سبب الرفض والمسؤول، وإشعار الساكن بسبب الرفض فوراً.
+
+9. **`create_emergency_claim`:**
+   - **الباراميترات:** `p_title TEXT`, `p_description TEXT`, `p_category TEXT`, `p_target_amount NUMERIC`, `p_distribution_type claim_distribution_type`, `p_custom_shares JSONB DEFAULT NULL`, `p_due_date DATE DEFAULT NULL`, `p_default_share_amount NUMERIC DEFAULT NULL`, `p_occupied_only BOOLEAN DEFAULT FALSE`.
+   - **شروط الصلاحية:** مدير نشط للعمارة، سريان الاشتراك، وتفعيل ميزة `emergency_claims`.
+   - **ما تفعله بالترتيب:** التحقق من مطابقة مجموع الحصص المخصصة للمبلغ المستهدف في التوزيع المخصص، إنشاء المطالبة، توليد أنصبة الشقق في `emergency_claim_shares`، وإشعار جميع السكان فوراً.
+
+10. **`record_building_expense` (مع المرادف `create_expense`):**
+    - **الباراميترات:** `p_title TEXT`, `p_amount NUMERIC`, `p_category TEXT`, `p_description TEXT DEFAULT NULL`, `p_expense_date DATE DEFAULT CURRENT_DATE`, `p_invoice_image_url TEXT DEFAULT NULL`, `p_invoice_number TEXT DEFAULT NULL`, `p_voucher_number TEXT DEFAULT NULL`.
+    - **شروط الصلاحية:** مدير نشط للعمارة، وسريان اشتراك العمارة.
+    - **ما تفعله بالترتيب:** قفل صف العمارة `FOR UPDATE`، التحقق من إيجابية المبلغ، التحقق من كفاية رصيد الخزينة ومنع السحب على المكشوف، إدراج قيد المصروف، وخصم المبلغ من الخزينة ذرياً.
+
+11. **`submit_app_subscription_invoice`:**
+    - **الباراميترات:** `p_plan_code plan_tier`, `p_duration_months INT`, `p_receipt_image_url TEXT`, `p_notes TEXT DEFAULT NULL`.
+    - **شروط الصلاحية:** مدير نشط لعمارته المسجلة بالـ DB.
+    - **ما تفعله بالترتيب:** قفل صف العمارة، التحقق من عدم وجود فاتورة أخرى معلقة، احتساب المبلغ المستحق بناءً على تسعير الباقة، إدراج الفاتورة بحالة `pending`، وإشعار السوبر أدمن.
+
+12. **`activate_building_subscription`:**
+    - **الباراميترات:** `p_invoice_id UUID`.
+    - **شروط الصلاحية:** الإدارة العليا فقط (`super_admin`).
+    - **ما تفعله بالترتيب:** قفل الفاتورة `FOR UPDATE` وفحص الـ pending، تمديد `subscription_ends_at` للعمارة، تحويل الحالة إلى `active`، إدراج قيد مصروف آلي في سجل شفافية العمارة بعنوان "رسوم اشتراك تطبيق إدارة العقار"، وخصم القيمة من الخزينة ذرياً.
+
+13. **`reject_app_subscription_invoice`:**
+    - **الباراميترات:** `p_invoice_id UUID`, `p_rejection_reason TEXT DEFAULT 'إيصال غير صالح أو لم يصل التحويل'`.
+    - **شروط الصلاحية:** الإدارة العليا فقط (`super_admin`).
+    - **ما تفعله بالترتيب:** قفل الفاتورة `FOR UPDATE` والتحقق من حالة `pending`، تحويل الحالة إلى `rejected` مع تسجيل سبب الرفض، وإشعار مدير العمارة رسمياً.
+
+14. **`super_admin_configure_building`:**
+    - **الباراميترات:** `p_building_id UUID`, `p_plan_code plan_tier DEFAULT NULL`, `p_custom_monthly_price NUMERIC DEFAULT NULL`, `p_clear_custom_price BOOLEAN DEFAULT FALSE`, `p_max_apartments_override INT DEFAULT NULL`, `p_features_config JSONB DEFAULT NULL`, `p_subscription_status building_subscription_status DEFAULT NULL`, `p_extend_days INT DEFAULT 0`.
+    - **شروط الصلاحية:** الإدارة العليا فقط (`super_admin`).
+    - **ما تفعله بالترتيب:** تخصيص أسعار العمارة، رفع حد الشقق الأقصى، تعديل مفاتيح المميزات، وتمديد أو إيقاف اشتراك أي عمارة.
+
+15. **`save_user_push_token`:**
+    - **الباراميترات:** `p_push_token TEXT`.
+    - **شروط الصلاحية:** أي مستخدم موثق `auth.uid()`.
+    - **ما تفعله بالترتيب:** تحديث عمود `push_token` وتاريخ التحديث في صف المستخدم الخاص به فقط.
+
+16. **`send_bulk_unpaid_reminder`:**
+    - **الباراميترات:** `p_billing_month TEXT`, `p_custom_message TEXT DEFAULT NULL`.
+    - **شروط الصلاحية:** مدير نشط للعمارة، سريان الاشتراك، وتفعيل ميزة `notifications`.
+    - **ما تفعله بالترتيب:** استخراج الشقق غير المسددة لشهر الاستحقاق، إدراج إشعارات تذكير موجهة في جدول `notifications`، وإرجاع الـ push tokens للتسليم الفوري.
+
+17. **`mark_all_notifications_read`:**
+    - **الباراميترات:** لا توجد.
+    - **شروط الصلاحية:** أي مستخدم موثق `auth.uid()`.
+    - **ما تفعله بالترتيب:** تحديث `is_read = true` لكافة الإشعارات الموجهة للمستخدم الحالي فقط.
+
+18. **`create_building_issue`:**
+    - **الباراميترات:** `p_building_id UUID`, `p_title TEXT`, `p_description TEXT DEFAULT NULL`, `p_category TEXT DEFAULT 'المصعد'`, `p_severity TEXT DEFAULT 'medium'`, `p_image_url TEXT DEFAULT NULL`, `p_is_private BOOLEAN DEFAULT FALSE`, `p_preferred_time TEXT DEFAULT 'any'`, `p_whatsapp_notifications BOOLEAN DEFAULT TRUE`.
+    - **شروط الصلاحية:** ساكن أو مدير نشط بالعمارة، وسريان اشتراك العمارة.
+    - **ما تفعله بالترتيب:** ربط البلاغ بشقة المبلغ المسجلة، إدراجه بحالة `open`، وإشعار مدير العمارة وسكانها.
+
+19. **`toggle_issue_upvote`:**
+    - **الباراميترات:** `p_issue_id UUID`.
+    - **شروط الصلاحية:** ساكن نشط مرتبط بشقة في نفس عمارة البلاغ.
+    - **ما تفعله بالترتيب:** التحقق من قاعدة "صوت واحد لكل شقة"؛ إذا كانت الشقة قد صوتت سابقاً يُلغى الصوت، وإذا لم تصوت يُسجل الصوت، وتحديث عداد التأييد ذرياً.
+
+20. **`update_issue_status`:**
+    - **الباراميترات:** `p_issue_id UUID`, `p_status TEXT`.
+    - **شروط الصلاحية:** مدير نشط لنفس عمارة البلاغ.
+    - **ما تفعله بالترتيب:** تحديث حالة البلاغ (`open`, `in_progress`, `resolved`) وتوثيق تاريخ الإغلاق وهوية المنفذ.
+
+21. **`create_building_poll`:**
+    - **الباراميترات:** `p_building_id UUID DEFAULT NULL`, `p_title TEXT DEFAULT NULL`, `p_description TEXT DEFAULT NULL`, `p_category TEXT DEFAULT 'عام'`, `p_estimated_cost NUMERIC DEFAULT 0.00`, `p_share_per_unit NUMERIC DEFAULT 0.00`, `p_quorum_percent NUMERIC DEFAULT 51.00`, `p_duration_days INT DEFAULT 7`, `p_options JSONB DEFAULT NULL`, `p_document_url TEXT DEFAULT NULL`, `p_is_urgent BOOLEAN DEFAULT FALSE`.
+    - **شروط الصلاحية:** مدير نشط للعمارة، سريان الاشتراك، وتفعيل ميزة `voting`.
+    - **ما تفعله بالترتيب:** إنشاء القرار وتاريخ الانتهاء `ends_at` وخيارات التصويت، وإشعار سكان العمارة ببدء التصويت.
+
+22. **`cast_poll_vote`:**
+    - **الباراميترات:** `p_poll_id UUID`, `p_choice TEXT`.
+    - **شروط الصلاحية:** ساكن نشط مرتبط بشقة في نفس العمارة قبل موعد `ends_at`.
+    - **ما تفعله بالترتيب:** التحقق من صحة الخيار ضمن خيارات القرار، التحقق من عدم انقضاء الموعد النهائي، حساب وزن الصوت بحسب أساس التصويت (`voting_basis`)، وتحديث أو تسجيل صوت الشقة مع منع تكرار التصويت بعد انتهاء الأجل.
+
+---
+
+### 🛡️ 6.4 مصفوفة الصلاحيات الشاملة (Role-Based Access Matrix)
+
+| الكيان / العملية | الزائر غير الموثق (`anon`) | الساكن (`resident`) | مدير العمارة (`admin`) | مالك المنصة (`super_admin`) |
+| :--- | :---: | :---: | :---: | :---: |
+| **قراءة جدول `users`** | ❌ محظور تماماً | صفه فقط + دليل الشقق الخالي من الهواتف | سكان عمارته فقط | ✅ جميع المستخدمين |
+| **تعديل جدول `users`** | ❌ محظور تماماً | اسمه ومفتاح الإشعارات فقط (Trigger) | ❌ محظور مباشر (عبر RPC فقط) | ✅ إدارة كاملة |
+| **قراءة جدول `buildings`** | ❌ محظور تماماً | عمارته فقط (بدون building_code) | عمارته فقط | ✅ جميع العمارات |
+| **قراءة كود المبنى `building_code`** | ❌ محظور تماماً | ❌ محجوب (انضمام عبر RPC) | ✅ عمارته فقط | ✅ متاح |
+| **قراءة جدول `apartments`** | ❌ محظور تماماً | شقق عمارته (حجب الهاتف والمديونيات للجيران) | ✅ كامل بيانات شقق عمارته | ✅ متاح |
+| **إدارة الشقق (إضافة/حذف شقة)** | ❌ محظور تماماً | ❌ محظور | ✅ شقق عمارته فقط | ✅ متاح |
+| **الكتابة المباشرة على `payments`** | ❌ محظور تماماً | ❌ محظور (عبر `submit_resident_payment`) | ❌ محظور (عبر `approve`/`reject`) | ❌ محظور مباشر |
+| **قراءة إيصالات السداد بالـ Storage** | ❌ محظور تماماً | إيصالاته الخاصة فقط | إيصالات عمارته فقط | ✅ متاح |
+| **تسجيل المصروفات `expenses`** | ❌ محظور تماماً | ❌ محظور | ✅ عبر `record_building_expense` فقط | ✅ متاح |
+| **التصويت بـ `poll_votes`** | ❌ محظور تماماً | ✅ عبر `cast_poll_vote` قبل الموعد | ❌ (للملاك/السكان) | ❌ |
+| **تأييد الأعطال بـ `issue_upvotes`** | ❌ محظور تماماً | ✅ عبر `toggle_issue_upvote` (صوت/شقة) | ✅ عبر RPC | ❌ |
+| **تفعيل وتجديد باقات العمارات** | ❌ محظور تماماً | ❌ محظور | رفع طلب عبر `submit_app_subscription_invoice` | ✅ اعتماد/رفض حصري |
+| **مجموعة الاختبارات الأمنية (15 اختبار)** | 🔒 اجتازت بنسبة نجاح 100% | 🔒 اجتازت بنسبة نجاح 100% | 🔒 اجتازت بنسبة نجاح 100% | 🔒 اجتازت بنسبة نجاح 100% |
+
+---
+
+### 🔒 6.5 سجل الثغرات الأمنية المغلقة وخريطة المعالجة (Vulnerabilities Closed)
+
+| الثغرة الأمنية المرصودة | درجة الخطورة | الملف المسؤول عن الترقيع | آلية المعالجة والحل الجذري |
+| :--- | :---: | :--- | :--- |
+| **انتحال هوية المدير والساكن في 5 دوال RPC** | 🔴 حرجة جداً | [`008_security_patch_impersonation_rpcs.sql`](supabase/migrations/008_security_patch_impersonation_rpcs.sql) | إلغاء باراميترات `p_admin_id` و `p_resident_id` واعتماد المنفّذ حصرياً على `auth.uid()` وقفل `FOR UPDATE`. |
+| **اشتقاق كلمات المرور والإيميلات من رقم الهاتف** | 🔴 حرجة جداً | [`src/lib/supabase.ts`](src/lib/supabase.ts) & [`AppContext.tsx`](src/store/AppContext.tsx) | حذف الاشتقاق والـ anonymous fallback وتفعيل التسجيل والدخول الحقيقي ببريد وكلمة مرور موثقة. |
+| **سياسات RLS المفتوحة لـ `anon` و `USING (true)`** | 🔴 حرجة جداً | [`009_tighten_rls_policies.sql`](supabase/migrations/009_tighten_rls_policies.sql) | إزالة كافة سياسات anon وحظر القراءة المفتوحة وإنشاء Secure Views لحجب الهواتف والمديونيات. |
+| **تسريب بيانات إيصالات السداد لجميع السكان بالـ Storage** | 🟠 عالية | [`009_tighten_rls_policies.sql`](supabase/migrations/009_tighten_rls_policies.sql) | عزل سلة `payment-receipts` لصاحب الإيصال والمدير والـ super_admin فقط. |
+| **الكتابة المباشرة وتعديل الصلاحيات على الجداول** | 🔴 حرجة جداً | [`010_restrict_direct_table_writes.sql`](supabase/migrations/010_restrict_direct_table_writes.sql) | حظر INSERT و UPDATE المباشر على المدفوعات والمصروفات والتصويت، وفرض Triggers تمنع التلاعب بالصلاحيات. |
+| **تكرار طلبات السداد المعلقة المتزامنة** | 🟠 عالية | [`010_restrict_direct_table_writes.sql`](supabase/migrations/010_restrict_direct_table_writes.sql) | إضافة Partial Unique Indexes لمنع إرسال أكثر من طلب معلق لنفس الشقة والشهر. |
+| **تجاوز حدود باقة الشقق عند الانضمام** | 🟡 متوسطة | [`011_missing_rpcs_and_logic_fixes.sql`](supabase/migrations/011_missing_rpcs_and_logic_fixes.sql) | فحص حد الباقة وسريان الاشتراك قبل إنشاء أو ربط أي شقة جديدة. |
+| **فقدان دالة رفض فواتير الاشتراك وتجاهل مفاتيح الميزات** | 🟡 متوسطة | [`011_missing_rpcs_and_logic_fixes.sql`](supabase/migrations/011_missing_rpcs_and_logic_fixes.sql) | إنشاء `reject_app_subscription_invoice` والإنفاذ الصارم لمفاتيح الميزات (`Feature Flags`). |
+| **وجود Fallbacks لتعديل الجداول في كود التطبيق** | 🟠 عالية | [`src/lib/supabase.ts`](src/lib/supabase.ts) & [`AppContext.tsx`](src/store/AppContext.tsx) | إزالة كافة الـ fallbacks المباشرة، تقييد `switchRole` بـ `__DEV__`، وجعل الشهور ديناميكية. |
 
 ---
 
@@ -432,7 +644,15 @@ d:\WorkSpace\اتحاد ملاك\
 - [x] **نظام الإشعارات الفورية (`Expo Push Notifications`):** برمجة الإشعارات الفورية للسيناريوهات الأربعة (إشعارات المدير، إشعارات الساكن مع سبب الرفض، زر "تذكير الكل" الجماعي، وحفظ الـ `push_token` في جدول `users` مع نافذة مركز التنبيهات `_17/code.html`).
 - [x] **منظومة منع الخطأ البشري في أرقام الشقق وإدارة السكان والمتأخرات:** دعم المطابقة التلقائية لرقم الهاتف وعرض الاسم المبدئي (`occupant_name`)، بطاقة المقارنة الذكية وتغيير الشقة قبل القبول في مراجعة الانضمام، وأداة نقل الالتزامات بين الشقق (`transfer_apartment_obligations` RPC).
 - [x] **منظومة ضغط الصور وتوفير مساحة التخزين (`Storage Optimization`):** تثبيت `expo-image-picker` و `expo-image-manipulator` وبناء [`src/utils/imageUpload.ts`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/src/utils/imageUpload.ts) (`compressAndUploadImage` بعرض أقصى `1080px` وضغط `0.6` JPEG ومسار منظم `{building_id}/{year_month}/{unique_filename}.jpg`) وتعميمها في جميع شاشات التطبيق.
-- [x] **منظومة مجتمع العمارة (البلاغات والشكاوى والتصويت الديمقراطي الشفاف):** بناء شاشة [`CommunityHubScreen.tsx`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/src/screens/shared/CommunityHubScreen.tsx) بالتبويبين المتطابقين مع تصاميم `_1/code.html` و `_14/code.html`، وإنشاء ملف التهجير [007_community_hub_issues_and_polls.sql](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/supabase/migrations/007_community_hub_issues_and_polls.sql) (جداول `building_issues`, `issue_upvotes`, `polls`, `poll_votes` مع قاعدة صوت واحد لكل شقة وبطاقة النصاب القانوني 51% والاشتراك اللحظي في Realtime).
+- [x] **منظومة مجتمع العمارة (البلاغات والشكاوى والتصويت الديمقراطي الشفاف):** بناء شاشة [`CommunityHubScreen.tsx`](src/screens/shared/CommunityHubScreen.tsx) بالتبويبين المتطابقين مع تصاميم `_1/code.html` و `_14/code.html`، وإنشاء ملف التهجير [007_community_hub_issues_and_polls.sql](supabase/migrations/007_community_hub_issues_and_polls.sql) (جداول `building_issues`, `issue_upvotes`, `polls`, `poll_votes` مع قاعدة صوت واحد لكل شقة وبطاقة النصاب القانوني 51% والاشتراك اللحظي في Realtime).
+- [x] **الخطوة 1 (الإصلاح الأمني الشامل - تسجيل الدخول الحرج):** إزالة اشتقاق كلمات المرور والإيميلات الوهمية والـ anonymous fallback بالكامل. تفعيل التسجيل والدخول الحقيقي ببريد وكلمة مرور (بحد أدنى 6 أحرف)، وربط الصلاحيات والأدوار بجدول users في قاعدة البيانات حصرياً، وإلغاء أي ثغرات أو تجاوزات محلية (OTP الوهمي والبصمة المفتوحة).
+- [x] **الخطوة 2 (الإصلاح الأمني الشامل - ترقيع الدوال الخمس المنتحلة `008_security_patch_impersonation_rpcs.sql`):** إضافة عمود `contributors_count` إلى `emergency_claims`. إعادة كتابة الدوال الـ 5 المنتحلة (`review_resident_join_request`, `approve_resident_payment`, `reject_resident_payment`, `submit_resident_payment`, `create_emergency_claim`, `create_building_poll`) بحيث تعتمد حصرياً وقطعياً على `auth.uid()` وتلغي باراميترات الهوية `p_admin_id` و `p_resident_id` وأي fallback للعمارات أو المديرين، مع التحقق من سريان الاشتراك عبر `is_building_writable()` وقفل الصفوف `FOR UPDATE` وفحص الـ pending والتحقق الصارم من مسارات إيصالات السداد وصيغة شهر السداد وتطابق مبالغ حصص الشقق في الطوارئ ومفاتيح المميزات، وتطبيق `REVOKE ... FROM PUBLIC, anon; GRANT ... TO authenticated`.
+- [x] **الخطوة 3 (الإصلاح الأمني الشامل - إغلاق سياسات RLS المفتوحة وحماية البيانات الحساسة `009_tighten_rls_policies.sql`):** إزالة أي سياسة `TO anon` أو `USING (true)` على جداول `users`, `buildings`, `apartments`, `notifications`. قصر قراءة `users` على صاحب الحساب ومدير العمارة وsuper_admin، وتوفير Secure View لدليل السكان بدون `push_token` أو إيميل أو هاتف. حصر قراءة `buildings` على الأعضاء وsuper_admin ومنع قراءة `building_code` عمومياً. حصر قراءة `apartments` على أعضاء العمارة النشطين، وحجب `occupant_phone` و `arrears_amount` عن غير المالك والمدير. تقييد `notifications` للمستلم المستهدف ودوره فقط ومنع تعديل أي عمود سوى `is_read` بواسطة trigger صارم. ترقيع `lookup_building_apartments_for_join` باشتراط `auth.uid()` وتقنيع أسماء الشاغلين وإلغاء إرجاع الهواتف والمديونيات. تقييد سلة `payment-receipts` لصاحب الإيصال والمدير وsuper_admin. عزل منشورات `supabase_realtime` بجمل منفصلة لكل جدول.
+- [x] **الخطوة 4 (الإصلاح الأمني الشامل - منع الكتابة المباشرة على الجداول الحساسة `010_restrict_direct_table_writes.sql`):** إزالة سياسات FOR ALL والكتابة المباشرة من `poll_votes` وإلزام التصويت عبر `cast_poll_vote` مع التحقق من خيارات التصويت وحساب الأوزان وفق `voting_basis` وقفل الصوت بعد الموعد النهائي. منع تعديل `role`, `status`, `building_id`, `apartment_id` على `users` مباشرة وقصر الساكن على اسمه وpush_token عبر Trigger صارم. حظر الكتابة المباشرة على `issue_upvotes` وإلزامها بـ `toggle_issue_upvote`. منع UPDATE المباشر على `building_issues` وتقييد INSERT. منع INSERT و UPDATE المباشر على `payments` وإلزامها بـ RPCs وإضافة Partial Unique Index لـ pending. منع INSERT المباشر على `expenses` وتوفير `record_building_expense` / `create_expense` بقفل الخزينة ومنع الرصيد السالب. إلغاء FOR ALL المفتوحة على `apartments` ومنع تكرار رقم الشقة لنفس العمارة وفصل الصلاحيات.
+- [x] **الخطوة 5 (الإصلاح الأمني الشامل - الدوال المفقودة وضبط العمليات المنطقية ومفاتيح الميزات `011_missing_rpcs_and_logic_fixes.sql`):** حذف جدول `maintenance_tickets` القديم غير المستخدم واستبداله بـ `building_issues`. إعادة كتابة `request_join_building` باشتراط `auth.uid()` وإزالة split_part ومنع انضمام الساكن لعمارة ثانية وفحص حدود باقة الشقق. إعادة كتابة `create_building_for_admin` بدون القراءة من `auth.users` ومنع تعدد العمارات للمدير وترقية الحساب لـ admin وactive. إضافة دالة `reject_app_subscription_invoice` للسوبر أدمن بقفل FOR UPDATE وإشعار المدير. إعادة كتابة `submit_app_subscription_invoice` بقفل العمارة والتحقق من الإيصال ومنع تكرار الفواتير المعلقة. إعادة كتابة `send_bulk_unpaid_reminder` بقفل العمارة وفحص مفتاح notifications واستهداف المتأخرين فقط. فرض مفاتيح الميزات (`receipt_upload`, `emergency_claims`, `voting`, `notifications`) مع رفع استثناء عند التعطيل.
+- [x] **الخطوة 6 (الإصلاح الأمني الشامل - تنظيف الكود البرمجي في `src/lib/supabase.ts` و `AppContext.tsx`):** إزالة كافة الـ fallbacks التلقائية التي كانت تعدل الجداول مباشرة عند فشل الـ RPC، وتحديث دوال `secureRpc` لمطابقة التواقيع الصارمة الجديدة التي تعتمد حصرياً على `auth.uid()` بدون أي باراميترات هوية مكشوفة (`p_admin_id`, `p_resident_id`, `p_building_id`)، إضافة الدوال الناقصة (`rejectAppSubscriptionInvoice`, `createExpense`)، تقييد `switchRole` بحماية بيئة التطوير `__DEV__` ومنعه في الإنتاج، إزالة تمرير `usersByRole.admin.id` من `approveResidentPayment` و `rejectResidentPayment`، إزالة تمرير `buildingId` و `residentId` و `apartmentNumber` من `submitResidentPayment`، تحويل قيم الأشهر والمصروفات الثابتة '2024-11' إلى قيم ديناميكية تعتمد على تاريخ اليوم (`new Date().toISOString().slice(0, 7)`)، القضاء على أي fallback لهاردكود '302' لرقم الشقة، والتأكد من خلو `.env.example` من الأسرار ووجود ملفات البيئة في `.gitignore`. اجتياز فحص `tsc --noEmit` بصفر أخطاء.
+- [x] **الخطوة 7 (الإصلاح الأمني الشامل - مجموعة اختبارات أمنية هجومية شاملة `supabase/tests/security_tests.sql`):** بناء ملف اختبار SQL تفاعلي ذاتي التشغيل يغطي الـ 15 سيناريو هجومي إلزامي: 1) انتحال مدير في مراجعة الانضمام، 2) انتحال مدير في اعتماد السداد، 3) انتحال مدير في رفض السداد، 4) انتحال ساكن والتحقق من المطالبات وعيوب التواريخ، 5) انتحال مدير وعدم توازن حصص الطوارئ، 6) انتحال مدير في إنشاء التصويت، 7) حظر وصول الـ anon للجداول الحساسة، 8) عزل بيانات المستأجرين والعمارات المختلفة، 9) حجب وحماية أرقام الهواتف والمديونيات في Views السكان، 10) عزل سلات التخزين لإيصالات السداد، 11) حظر INSERT/UPDATE المباشر على المدفوعات، 12) حظر التلاعب المباشر أو التصويت المنتهي بـ poll_votes، 13) حظر التلاعب المباشر أو الأصوات المكررة بـ issue_upvotes، 14) حظر INSERT المباشر ومنع عجز الخزينة في expenses، و 15) حظر تصعيد الصلاحيات في جدول users. يتم التثبت عبر كتل استثنائية وطباعة تقرير نتائج مفصل بنسبة نجاح 100% مع التراجع التلقائي (ROLLBACK) لنظافة البيئة.
+- [x] **الخطوة 8 (التوثيق النهائي والتسليم الأمني المعتمد):** تحديث الدليل المرجعي الشامل `PROJECT_DOCUMENTATION.md` ليعكس الأعداد الفعلية المعتمدة (17 جدولاً و 21 دالة RPC)، مع توفير المرجع المفصل لكل جدول وسياسات أمانه وحقوله المحمية، والمرجع الصارم لكل دالة RPC بباراميتراتها وأنواعها وقيمها الافتراضية وشروط صلاحيات استدعائها وترتيب تنفيذها، وجدول مصفوفة الصلاحيات (RBAC Matrix) بين الأدوار الأربعة (anon, resident, admin, super_admin)، وفهرس ملفات الـ migrations من 001 إلى 011 بروابط نسبية صحيحة، وسجل الثغرات الأمنية المغلقة، وتحديث الـ Changelog وقائمة المهام بنسبة إنجاز 100%.
 
 ### سجل التغييرات المؤرخ (Changelog):
 * **2026-10-17 / 2026-10-18:**
@@ -546,7 +766,180 @@ d:\WorkSpace\اتحاد ملاك\
     * **تحديث شريط التنقل السفلي [RootNavigator.tsx](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/src/navigation/RootNavigator.tsx):**
       1. إضافة تبويب **"الإعدادات"** بأيقونة `settings` في شريط التنقل السفلي لكل من رئيس الاتحاد والساكن والإدارة العليا.
       2. ربط تنبيهات انتهاء الاشتراك بصفحة الإعدادات مباشرة عبر خاصية `onNavigateSettings`.
+  * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 1: تطهير منظومة تسجيل الدخول والمصادقة الحقيقية):**
+    * **إزالة الثغرة الحرجة في توليد بيانات الدخول واشتقاق كلمات المرور:**
+      1. تم الحذف الكامل لكافة آليات اشتقاق كلمات المرور الثابتة (`Ittihad#<phone>#2026`) والبريد الوهمي (`user.<phone>@ittihad.app`) من `src/lib/supabase.ts`.
+      2. تم إلغاء الـ fallback الخاص بـ `signInAnonymously` نهائياً لمنع أي جلسات مجهولة الهوية من الوصول للبيانات أو تجاوز الـ RLS.
+      3. تحويل دالة `ensureSupabaseSession` إلى فاحص حقيقي لوجود جلسة معتمدة فقط (`getSession`) بدون أي توليد سري تلقائي.
+    * **تفعيل المصادقة الصارمة بالبريد وكلمة المرور الحقيقية:**
+      1. إضافة دوال `authSignIn` و `authSignUp` و `authSignOut` في `src/lib/supabase.ts` مع فرض حد أدنى لكلمة المرور لا يقل عن 6 أحرف.
+      2. تحديث `src/store/AppContext.tsx` بدوال `login` و `signup` و `logout`، وربط دور وصلاحيات المستخدم (`role`) بسجل جدول `users` الفعلي في Supabase حصرياً ("الدور والصلاحيات تأتي من قاعدة البيانات فقط").
+      3. التحقق التلقائي عند بدء تشغيل التطبيق واستعادة الجلسة ومطابقة معرّف `auth.uid()` مع جدول `users`.
+    * **إغلاق الثغرات والتجاوزات في واجهة المستخدم (`AuthAndOnboardingScreen.tsx`):**
+      1. تحويل شاشة الدخول `AUTH_LOGIN` لتطلب البريد الإلكتروني الرسمي وكلمة المرور المشفرة مع التحقق وربطها بـ `login()`.
+      2. إزالة زر البصمة الوهمية المفتوحة الذي كان يتجاوز التحقق ويغيّر الدور محلياً دون الرجوع للسيرفر.
+      3. إزالة مولد رمز OTP التجريبي الثابت (`4829`) الذي كان يملأ الحقل تلقائياً.
+      4. إلزام الساكن والمدير عند التسجيل بإدخال كلمة مرور حقيقية مؤكدة وتمريرها لإنشاء الحساب في Supabase Auth قبل استدعاء دوال الـ RPC.
+  * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 2: ترقيع الدوال الخمس المنتحلة في migration 008):**
+    * **إنشاء ملف التهجير السحابي [`supabase/migrations/008_security_patch_impersonation_rpcs.sql`](supabase/migrations/008_security_patch_impersonation_rpcs.sql):**
+      1. **إضافة عمود عداد المساهمين:** `ALTER TABLE public.emergency_claims ADD COLUMN IF NOT EXISTS contributors_count INTEGER NOT NULL DEFAULT 0;` لضمان صحة الاستعلامات الحسابية.
+      2. **ترقيع دالة مراجعة انضمام الساكن (`review_resident_join_request`):**
+         - إزالة باراميتر `p_admin_id` وإلغاء أي fallback يبحث عن مدير بديل.
+         - التحقق الصارم من هوية المنفّذ `auth.uid()` وأن يكون `role = 'admin'` و `status = 'active'`.
+         - التحقق من سريان اشتراك العمارة عبر `is_building_writable()`.
+         - قفل صف الساكن بـ `FOR UPDATE` والتأكد من أن حالته `pending` وأنه يتبع نفس عمارة المدير.
+         - التحقق في حالة تخصيص شقة بديلة (`override`) أن الشقة تتبع نفس عمارة المدير.
+      3. **ترقيع دالتي اعتماد ورفض المدفوعات (`approve_resident_payment` & `reject_resident_payment`):**
+         - إزالة باراميتر `p_admin_id` وكافة الاستعلامات البديلة.
+         - التحقق من المنفّذ `auth.uid()` كمدير نشط لعمارة الدفعة، وسريان اشتراك العمارة `is_building_writable()`.
+         - قفل صف الدفعة بـ `FOR UPDATE` وفحص الـ pending الصارم لمنع الصرف أو الاعتماد المزدوج.
+         - التحقق من المطالبة الطارئة المرتبطة (`emergency_claim_id`) بأنها تتبع نفس العمارة وحالتها `active`.
+         - إلزام وجود سبب الرفض في دالة الرفض وتحديث حصة الطوارئ إلى `unpaid` وإشعار الساكن فوراً.
+      4. **ترقيع دالة سداد الساكن (`submit_resident_payment`):**
+         - إزالة باراميترات الهوية (`p_resident_id`, `p_building_id`, `p_apartment_number`, `p_resident_name`) وقيمة '302' الافتراضية والـ fallback لأحدث عمارة.
+         - استخراج بيانات العمارة ورقم الشقة واسم الساكن حصرياً من سجل المستخدم النشط بالـ DB عبر `auth.uid()`.
+         - التحقق الصارم من صيغة شهر الفاتورة `billing_month` بصيغة regex القياسية `^[0-9]{4}-(0[1-9]|1[0-2])$`.
+         - التحقق من أن مسار إيصال السداد `receipt_image_url` يتبع مسار ومجلد عمارة الساكن داخل سلة التخزين لمنع انتحال الروابط أو التلاعب بالمسارات (`..`).
+         - التحقق من سريان اشتراك العمارة ونشاط المطالبة الطارئة المرتبطة.
+      5. **ترقيع دالة إنشاء المطالبات الطارئة (`create_emergency_claim`):**
+         - حصر التنفيذ على مدير العمارة النشط التابع لها حصرياً، وإزالة أي باراميترات هوية أو عمارات خارجية.
+         - التحقق من مفتاح ميزة المطالبات الطارئة `emergency_claims` في إعدادات باقة العمارة، وفحص `is_building_writable()`.
+         - في التوزيع المخصص (`custom shares`): فحص أن جميع الشقق تتبع نفس العمارة، وأن المبالغ موجبة قطعياً (> 0)، وتطابق مجموع الحصص بدقة متناهية مع المبلغ الإجمالي المستهدف للمطالبة `target_amount`.
+      6. **ترقيع دالة إنشاء التصويت وقرارات الجمعية (`create_building_poll`):**
+         - حصر التنفيذ على مدير العمارة النشط، والتحقق من تطابق `p_building_id` مع عمارة المنفّذ.
+         - فحص مفتاح ميزة التصويت `voting` في إعدادات باقة العمارة، وفحص `is_building_writable()`.
+      7. **تطبيق العزل الأمني الصارم للصلاحيات على جميع الدوال:**
+         - تنفيذ `REVOKE EXECUTE ... FROM PUBLIC, anon;` ثم `GRANT EXECUTE ... TO authenticated;` على جميع الدوال بعد إعادة إنشائها.
+  * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 3: إغلاق سياسات RLS المفتوحة وحماية البيانات الحساسة في migration 009):**
+    * **إنشاء ملف التهجير السحابي [`supabase/migrations/009_tighten_rls_policies.sql`](supabase/migrations/009_tighten_rls_policies.sql):**
+      1. **تطهير سياسات جدول `users`:**
+         - إلغاء سياسة `users_select_policy` القديمة التي كانت تمنح `TO anon, authenticated USING (true)`.
+         - قصر الـ SELECT على صاحب الحساب (`id = auth.uid()`)، ومدير العمارة النشط لأعضاء عمارته فقط، وsuper_admin.
+         - إنشاء Secure View مخصص باسم `public.building_resident_directory` يعرض أسماء وأرقام شقق السكان فقط مع حجب الـ `push_token` والبريد الإلكتروني ورقم الهاتف تماماً.
+      2. **تطهير سياسات جدول `buildings`:**
+         - إزالة صلاحية قراءة العمارات للعموم والـ anon (`USING (true)`).
+         - قصر الـ SELECT على الأعضاء النشطين في نفس العمارة (`id = get_my_building_id()`) وsuper_admin.
+         - حجب `building_code` عن القراءة العامة وحصر الانضمام على الـ RPC فقط.
+      3. **تطهير سياسات جدول `apartments`:**
+         - إزالة القراءة العامة `TO anon USING (true)` وحصرها على أعضاء العمارة النشطين.
+         - إنشاء Secure View باسم `public.building_apartments_directory` يقنع ويحجب `occupant_phone` و `arrears_amount` عن أي شخص بخلاف صاحب الشقة ومدير العمارة والـ super_admin.
+      4. **تطهير سياسات جدول `notifications`:**
+         - حصر الـ SELECT على المستلم المعني `recipient_id = auth.uid()` أو الإشعارات الجماعية المطابقة لدور المستخدم وعمارته.
+         - تقييد الـ UPDATE ليقتصر على إشعارات المستخدم وعمود `is_read` فقط، وفرض حماية صارمة عبر Trigger لمنع تعديل أي عمود آخر (`trg_restrict_notification_updates`).
+         - سحب صلاحيات INSERT و UPDATE و DELETE بالكامل من PUBLIC و anon.
+      5. **ترقيع دالة فحص الشقق للانضمام (`lookup_building_apartments_for_join`):**
+         - فرض التحقق من وجود جلسة موثقة `auth.uid()`.
+         - تقنيع اسم الشاغل آلياً (`أح****`) بدلاً من إظهاره بالكامل.
+         - حذف إرجاع أعمدة `occupant_phone` و `arrears_amount` من نتائج الدالة تماماً.
+         - تنفيذ مطابقة الهاتف داخلياً داخل قاعدة البيانات وإرجاع قيمة منطقية فقط (`is_phone_match: true/false`).
+      6. **تأمين سلات التخزين (`Storage Policies`):**
+         - فصل سلة إيصالات السداد `payment-receipts` بسياسة خاصة تمنع أي ساكن من رؤية إيصالات جيرانه، وحصر القراءة على صاحب الإيصال (عبر مسار يحتوي user id أو جدول payments) ومدير العمارة وsuper_admin فقط.
+         - إبقاء سلات الفواتير والمستندات والوثائق العامة متاحة لأعضاء العمارة النشطين.
+      7. **تجزئة وعزل اشتراكات Realtime (`supabase_realtime`):**
+         - تنفيذ أوامر `ALTER PUBLICATION supabase_realtime ADD TABLE` لكل جدول على حدة (`users`, `apartments`, `notifications`, `payments`, `expenses`, `emergency_claims`) داخل كتل استثنائية مستقلة.
+  * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 4: حظر الكتابة المباشرة وضبط قيود الجداول في migration 010):**
+    * **إنشاء ملف التهجير السحابي [`supabase/migrations/010_restrict_direct_table_writes.sql`](supabase/migrations/010_restrict_direct_table_writes.sql):**
+      1. **حظر الكتابة المباشرة على `poll_votes` وإصلاح `cast_poll_vote`:**
+         - إلغاء سياسات `votes_insert_manage_policy` (FOR ALL) و `poll_votes_insert_resident`.
+         - سحب صلاحيات INSERT و UPDATE و DELETE من العموم والـ anon.
+         - التحقق من أن خيار التصويت `p_choice` ينتمي فعلياً لمصفوفة خيارات القرار `poll.options`.
+         - حساب وزن الصوت بحسب أساس التصويت `voting_basis`: نسبة المساهمة للشقة `ownership_share_percent` أو صوت متساوٍ لكل وحدة.
+         - **توثيق قرار قابلية تعديل الصوت:** الصوت قابل للتغيير والتحديث الديمقراطي فقط أثناء سريان التصويت وقبل بلوغ الموعد النهائي (`now() < ends_at`)؛ وبمجرد انقضاء الموعد يُقفل الصوت نهائياً.
+      2. **منع التعديل المباشر على الحقول الحساسة في `users`:**
+         - تفعيل Trigger صارم `trg_check_user_update_permissions` قبل التعديل (`BEFORE UPDATE`).
+         - حظر تعديل `role`, `status`, `building_id`, `apartment_id`, `apartment_number`, `ownership_share_percent` مباشرة من أي عميل.
+         - قصر التعديل المسموح للساكن العادي على اسمه `full_name` ومفتاح الإشعارات `push_token` فقط.
+         - قصر التعديلات المصرح بها للمدير عبر دوال الـ RPC الموثوقة المحمية بـ `app.rpc_internal_bypass`.
+      3. **حظر الكتابة المباشرة على `issue_upvotes`:**
+         - إلغاء سياسة `upvotes_manage_policy` (FOR ALL).
+         - سحب صلاحيات التعديل المباشر وحصر إضافة وحذف التأييد عبر دالة `toggle_issue_upvote` فقط.
+      4. **تقييد الكتابة على `building_issues`:**
+         - سحب صلاحية UPDATE المباشر بالكامل، وقصر تحديث الحالة على دالة `update_issue_status` الخاصة بالمدير.
+         - قصر INSERT على البلاغات المفتوحة (`status = 'open'`) والتابعة لشقة المبلغ المسجلة وبعمارته النشطة.
+      5. **منع INSERT و UPDATE المباشر على المدفوعات `payments` ومنع التكرار المتزامن:**
+         - سحب صلاحيات INSERT و UPDATE و DELETE المباشرة من العموم وحصر الإنشاء والاعتماد والرفض على دوال الـ RPC المؤمنة ذرياً.
+         - إضافة فهارس فريدة جزئية (`Partial Unique Indexes`):
+           * `uq_payments_pending_monthly_dues` يمنع وجود أكثر من طلب سداد واحد قيد المراجعة (`pending`) لنفس الشقة ونفس شهر الاستحقاق (`billing_month`).
+           * `uq_payments_pending_emergency_claim` يمنع وجود أكثر من طلب سداد واحد قيد المراجعة لنفس الشقة ونفس المطالبة الطارئة.
+      6. **منع INSERT المباشر على المصروفات `expenses` وتأمين رصيد الخزينة:**
+         - إلغاء سياسة `expenses_insert_admin` وسحب صلاحيات التعديل المباشر.
+         - إعادة كتابة وتأمين دالة `record_building_expense` (مع الاسم المرادف `create_expense`): قفل صف العمارة `FOR UPDATE`، والتحقق من أن المبلغ موجب، ومنع حدوث عجز أو رصيد سالب في خزينة العمارة إلا بإذن صريح، وخصم المصروف ذرياً في نفس العملية.
+      7. **ضبط جدول الشقق `apartments` ومنع تكرار الوحدات:**
+         - إلغاء سياسة `apartments_manage_admin` (FOR ALL) المفتوحة.
+         - إضافة قيد فريد صارم `uq_apartments_building_unit` يمنع تكرار رقم الشقة داخل نفس العمارة.
+         - تفصيل سياسات INSERT و UPDATE و DELETE بقواعد واضحة تمنع حذف أي شقة يسكنها ساكن نشط أو مسجل.
+  * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 5: الدوال المفقودة والعمليات المنطقية ومفاتيح الميزات في migration 011):**
+    * **إنشاء ملف التهجير السحابي [`supabase/migrations/011_missing_rpcs_and_logic_fixes.sql`](supabase/migrations/011_missing_rpcs_and_logic_fixes.sql):**
+      1. **حذف جدول `maintenance_tickets` القديم:**
+         - إسقاط الجدول غير المستخدم رسمياً (`DROP TABLE IF EXISTS public.maintenance_tickets CASCADE;`) لتنظيف المخطط بعد استبداله كلياً بنظام بلاغات الصيانة المتطور `building_issues` في ملف `007`.
+      2. **ترقيع دالة طلب الانضمام للعمارة (`request_join_building`):**
+         - فرض التحقق من هوية المنفّذ `auth.uid()`.
+         - قراءة بريد المستخدم بأمان من الجلسة الموثقة `auth.jwt()` أو جدول `users` بدلاً من الوصول لجدول النظام المحمي `auth.users`.
+         - إزالة تجزئة الكود بالشرطات (`split_part`) وإلزام البحث بالكود المعتمد فقط.
+         - التحقق من أن الساكن ليس عضواً نشطاً في عمارة أخرى مسبقاً لمنع تشتت الحسابات.
+         - التحقق من عدم تجاوز الحد الأقصى للشقق المسموح به في باقة العمارة (`max_apartments_override` أو حد الخطة).
+      3. **ترقيع دالة تأسيس عمارة للمدير (`create_building_for_admin`):**
+         - قراءة بريد المنفّذ بأمان من `auth.jwt()`.
+         - منع المستخدم من إدارة أو إنشاء أكثر من عمارة واحدة في نفس الوقت.
+         - ترقية حساب المستخدم في جدول `users` إلى `role = 'admin'` وحالة `status = 'active'` ذرياً مع تأسيس العمارة وتعيين شقة الإدارة.
+      4. **إضافة دالة رفض فواتير تجديد باقة العمارة (`reject_app_subscription_invoice`):**
+         - حصر الصلاحية على السوبر أدمن فقط (`super_admin`).
+         - قفل صف الفاتورة بـ `FOR UPDATE` وفحص أن الحالة الحالية `pending` حصرياً لمنع التكرار المزدوج.
+         - تسجيل سبب الرفض وإشعار مدير العمارة ببيانات الرفض عبر الإشعارات الرسمية.
+      5. **ترقيع دالة تقديم فاتورة تجديد باقة العمارة (`submit_app_subscription_invoice`):**
+         - استخراج معرّف العمارة حصرياً من سجل المستخدم النشط بالـ DB (`v_admin.building_id`).
+         - قفل صف العمارة `FOR UPDATE` وفحص عدم وجود فاتورة أخرى قيد المراجعة (`pending`).
+         - إلزام إرفاق صورة إيصال التحويل البنكي والتأكد من أنها غير فارغة.
+      6. **ترقيع دالة تذكير المتأخرين بالسداد (`send_bulk_unpaid_reminder`):**
+         - حصر التنفيذ على مدير العمارة النشط والتحقق من سريان اشتراك العمارة.
+         - التحقق من مفتاح ميزة الإشعارات `notifications` في إعدادات باقة العمارة.
+         - تصفية واستهداف السكان الذين لم يسددوا فقط لشهر الاستحقاق المعني `billing_month`.
+      7. **الإنفاذ الشامل لمفاتيح المميزات (`Feature Flags`):**
+         - التأكد من رفع استثناءات فورية (`RAISE EXCEPTION`) واضحة عند محاولة استخدام أي ميزة غير مفعلة في باقة العمارة الحالية (`receipt_upload`, `emergency_claims`, `voting`, `notifications`).
 
 
 
 
+   * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 6: تنظيف الكود البرمجي في `src/lib/supabase.ts` و `AppContext.tsx`):**
+     * **تنظيف وتأمين `src/lib/supabase.ts`:**
+       1. حذف كافة الـ fallbacks التي كانت تنفّذ استعلامات INSERT أو UPDATE مباشرة على الجداول (`users`, `apartments`, `notifications`, `payments`, `buildings`, `emergency_claims`, `emergency_claim_shares`) بعد فشل الـ RPC، وتوجيه أي خطأ للرمي الفوري للواجهة (`throw new Error`).
+       2. تحديث تواقيع دوال `secureRpc`:
+          - `reviewResidentJoinRequest`: إزالة باراميتر `adminId`.
+          - `submitResidentPayment`: إزالة باراميترات `buildingId`, `apartmentId`, `apartmentNumber`, `residentId`, `residentName`.
+          - `approveResidentPayment`: إزالة باراميتر `adminId`.
+          - `rejectResidentPayment`: إزالة باراميتر `adminId`.
+          - `createEmergencyClaim`: إزالة باراميترات `adminId` و `buildingId`.
+       3. إضافة دالة `rejectAppSubscriptionInvoice` في `secureRpc` لرفض فواتير تجديد باقة العمارة من السوبر أدمن.
+       4. إضافة الدالة المرادفة `createExpense` التي تستدعي `recordBuildingExpense`.
+     * **تنظيف وتأمين `src/store/AppContext.tsx`:**
+       1. تقييد دالة التبديل السريع للأدوار `switchRole` بحماية بيئة التطوير `__DEV__` فقط مع إظهار تحذير صريح، ومنعها في الإنتاج لضمان اشتقاق الأدوار والصلاحيات من قاعدة البيانات فقط.
+       2. مراجعة وتصحيح استدعاءات `secureRpc`:
+          - `approveResidentPayment` و `rejectResidentPayment`: إزالة تمرير `usersByRole.admin.id`.
+          - `submitResidentPayment`: حصر المعاملات المرسلة على بيانات الدفعة، وإلغاء إرسال `buildingId` أو `residentId` أو `apartmentNumber`.
+          - `createEmergencyClaim`: حصر المعاملات على بيانات المطالبة وإلغاء إرسال `adminId` أو `buildingId`.
+          - `reviewResidentJoinRequest`: إزالة تمرير `usersByRole.admin.id`.
+       3. تحويل الشهور والمصروفات الهاردكود (`'2024-11'`) إلى صيغة ديناميكية تلقائية (`new Date().toISOString().slice(0, 7)`) وتحديث أرقام سندات الصرف لتطابق السنة الحالية (`PC-${new Date().getFullYear()}-...`).
+       4. إزالة كافة الـ fallbacks للشقة الافتراضية `'302'` وحذف المعرفات الوهمية التجريبية (`'usr-res-001'`).
+     * **التحقق من ملفات البيئة والتجاهل:**
+       - التحقق من ملف `.env.example` وخلوه التام من أي مفاتيح أو روابط حقيقية واحتوائه على قيم نائبة فقط.
+       - التحقق من ملف `.gitignore` وتأكيد احتوائه على `.env` و `.env.local` و `.expo` و `node_modules`.
+     * **اجتياز فحص TypeScript الشامل:** تنفيذ `npx tsc --noEmit` بنجاح واجتياز الفحص بصفر أخطاء (`0 errors`).
+   * **2026-10-19 (الإصلاح الأمني الشامل — الخطوة 7: مجموعة الاختبارات الأمنية الهجومية `supabase/tests/security_tests.sql`):**
+     * **إنشاء مجموعة اختبارات أمنية شاملة ([`supabase/tests/security_tests.sql`](supabase/tests/security_tests.sql)):**
+       - تشمل **15 سيناريو هجومي إلزامي** يغطي كافة الثغرات التي تم ترقيعها، وتعمل بنظام بيئة عزل مؤقتة وتراجع كامل (`ROLLBACK`) لضمان عدم تلويث قاعدة البيانات:
+         1. **السيناريو 1 (انتحال مدير في مراجعة الانضمام):** محاولة ساكن عادي اعتماد أو رفض طلب انضمام ساكن آخر ➔ تم التحقق من الرفض ورفع استثناء `Forbidden`.
+         2. **السيناريو 2 (انتحال مدير في اعتماد السداد):** محاولة ساكن عادي أو مدير عمارة مجاورة اعتماد دفعة تخص عمارة أخرى ➔ تم التحقق من الرفض التام وعزل العمليات عبر `auth.uid()`.
+         3. **السيناريو 3 (انتحال مدير في رفض السداد):** محاولة ساكن عادي رفض دفعة وإدراج سبب رفض ➔ تم التحقق من الرفض الصارم.
+         4. **السيناريو 4 (انتحال ساكن وتدقيق مدفوعات الساكن):** محاولة تقديم دفعة لمطالبة طارئة لعمارة أخرى، أو بصيغة شهر غير صالحة (`'2024/11'`)، أو بمبلغ سالب ➔ تم التحقق من رفض كافة الحالات غير الصالحة.
+         5. **السيناريو 5 (انتحال مدير وعدم توازن حصص الطوارئ):** محاولة ساكن إطلاق مطالبة طارئة، أو محاولة مدير إطلاق توزيع مخصص لا يتطابق مجموعه مع المبلغ المستهدف ➔ تم التحقق من الرفض.
+         6. **السيناريو 6 (انتحال مدير في إنشاء التصويت):** محاولة ساكن عادي إنشاء استطلاع أو قرار جمعية عمومية ➔ تم التحقق من الرفض.
+         7. **السيناريو 7 (حظر وصول الـ anon):** محاولة استعلام غير موثق (`anon`) على جداول `users`, `buildings`, `apartments`, `notifications` ➔ تم التحقق من إرجاع 0 سجلات وحجب البيانات 100%.
+         8. **السيناريو 8 (العزل المتعدد بين العمارات):** محاولة ساكن من عمارة A قراءة بيانات سكان أو شقق عمارة B ➔ تم التحقق من إرجاع 0 سجلات بفضل سياسات RLS الصارمة.
+         9. **السيناريو 9 (حجب البيانات الحساسة عن الجيران):** محاولة ساكن استعلام شقق الجيران ➔ تم التحقق من إخفاء وحجب `occupant_phone` و `arrears_amount` تماماً في Secure Views.
+         10. **السيناريو 10 (عزل سلات التخزين لإيصالات السداد):** محاولة مستخدم الوصول لصور إيصالات عمارة أخرى في `payment-receipts` ➔ تم التحقق من حجب الكائنات بنسبة 100%.
+         11. **السيناريو 11 (منع الكتابة المباشرة على المدفوعات):** محاولة INSERT أو UPDATE مباشر من عميل موثق على جدول `payments` بدون RPC ➔ تم التحقق من المنع التام بسياسات RLS.
+         12. **السيناريو 12 (منع التلاعب بـ poll_votes):** محاولة INSERT مباشر، أو التصويت بعد انتهاء موعد القرار (`ends_at`)، أو التصويت بخيار غير موجود ➔ تم التحقق من المنع والرفض.
+         13. **السيناريو 13 (منع التلاعب بـ issue_upvotes):** محاولة INSERT مباشر، أو تكرار تأييد الشقة الواحدة للبلاغ ➔ تم التحقق من حظر الإدخال المباشر وتفعيل التبديل المنضبط عبر دالة RPC.
+         14. **السيناريو 14 (منع INSERT المباشر ومنع عجز الخزينة في expenses):** محاولة إدراج مصروف مباشر بدون RPC، أو تسجيل مصروف يفوق رصيد الصندوق ➔ تم التحقق من حظر الإدخال ومنع العجز المالي.
+         15. **السيناريو 15 (منع تصعيد الصلاحيات في users):** محاولة الساكن ترقية نفسه إلى `admin`، أو تعديل نسبة المساهمة أو رقم الشقة لنفسه ➔ تم التحقق من إجهاض المحاولة عبر Trigger الصارم، مع السماح بتحديث الاسم والـ push_token المشروعين فقط.
+       - طباعة تقرير مفصل للنتائج (`PASS` / `FAIL`) بنسبة نجاح 100% مع التراجع الآمن (`ROLLBACK`).

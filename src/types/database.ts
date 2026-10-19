@@ -13,7 +13,7 @@ export type CashRecipientType = 'admin' | 'guard';
 export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'rejected';
 export type PaymentStatusType = PaymentStatus;
 
-export type PaymentCategoryType = 'monthly_dues' | 'emergency_claim';
+export type PaymentCategoryType = 'monthly_dues' | 'emergency_claim' | 'other';
 
 export type ClaimDistributionType = 'equal' | 'custom';
 

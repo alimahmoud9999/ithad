@@ -11,6 +11,7 @@ import {
   Modal,
   ActivityIndicator,
   Share,
+  I18nManager,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../theme/colors';
@@ -25,7 +26,7 @@ import {
   PollOption,
 } from '../../types/database';
 
-type CommunityTab = 'issues' | 'polls';
+type CommunityTab = 'issues' | 'polls' | 'campaigns';
 type IssueFilter = 'all' | 'open' | 'in_progress' | 'resolved';
 
 const ISSUE_CATEGORIES = [
@@ -97,6 +98,8 @@ export const CommunityHubScreen: React.FC = () => {
     currentUser,
     buildingIssues,
     polls,
+    emergencyClaims,
+    payments,
     createBuildingIssue,
     toggleIssueUpvote,
     updateIssueStatus,
@@ -110,6 +113,7 @@ export const CommunityHubScreen: React.FC = () => {
   const [issueFilter, setIssueFilter] = useState<IssueFilter>('all');
   const [isAddIssueModalOpen, setIsAddIssueModalOpen] = useState(false);
   const [selectedIssueImage, setSelectedIssueImage] = useState<string | null>(null);
+  const [selectedIssueDetails, setSelectedIssueDetails] = useState<BuildingIssue | null>(null);
 
   // New Issue Form State
   const [issueTitle, setIssueTitle] = useState('');
@@ -279,75 +283,116 @@ export const CommunityHubScreen: React.FC = () => {
     <View style={styles.container}>
       {/* 1. Header Segmented Tabs (_14/code.html lines 51-66) */}
       <View style={styles.tabsHeader}>
-        <TouchableOpacity
-          style={[styles.mainTab, activeTab === 'issues' && styles.mainTabActive]}
-          onPress={() => setActiveTab('issues')}
-          activeOpacity={0.8}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsHeaderScroll}
         >
-          <MaterialIcons
-            name="build"
-            size={18}
-            color={activeTab === 'issues' ? COLORS.primary : COLORS.onSurfaceVariant}
-          />
-          <Text
-            style={[
-              styles.mainTabText,
-              activeTab === 'issues' && styles.mainTabTextActive,
-            ]}
+          <TouchableOpacity
+            style={[styles.mainTab, activeTab === 'issues' && styles.mainTabActive]}
+            onPress={() => setActiveTab('issues')}
+            activeOpacity={0.8}
           >
-            البلاغات والشكاوى
-          </Text>
-          <View
-            style={[
-              styles.tabBadge,
-              activeTab === 'issues' && styles.tabBadgeActive,
-            ]}
-          >
+            <MaterialIcons
+              name="build"
+              size={16}
+              color={activeTab === 'issues' ? '#FFFFFF' : '#64748B'}
+            />
             <Text
               style={[
-                styles.tabBadgeText,
-                activeTab === 'issues' && styles.tabBadgeTextActive,
+                styles.mainTabText,
+                activeTab === 'issues' && styles.mainTabTextActive,
               ]}
             >
-              {buildingIssues.length}
+              البلاغات والشكاوى
             </Text>
-          </View>
-        </TouchableOpacity>
+            <View
+              style={[
+                styles.tabBadge,
+                activeTab === 'issues' && styles.tabBadgeActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tabBadgeText,
+                  activeTab === 'issues' && styles.tabBadgeTextActive,
+                ]}
+              >
+                {buildingIssues.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.mainTab, activeTab === 'polls' && styles.mainTabActive]}
-          onPress={() => setActiveTab('polls')}
-          activeOpacity={0.8}
-        >
-          <MaterialIcons
-            name="how-to-vote"
-            size={19}
-            color={activeTab === 'polls' ? COLORS.primary : COLORS.onSurfaceVariant}
-          />
-          <Text
-            style={[
-              styles.mainTabText,
-              activeTab === 'polls' && styles.mainTabTextActive,
-            ]}
+          <TouchableOpacity
+            style={[styles.mainTab, activeTab === 'polls' && styles.mainTabActive]}
+            onPress={() => setActiveTab('polls')}
+            activeOpacity={0.8}
           >
-            التصويت والقرارات
-          </Text>
-          <View
-            style={[
-              styles.tabBadge,
-              activeTab === 'polls' && styles.tabBadgeActive,
-            ]}
-          >
+            <MaterialIcons
+              name="how-to-vote"
+              size={16}
+              color={activeTab === 'polls' ? '#FFFFFF' : '#64748B'}
+            />
             <Text
               style={[
-                styles.tabBadgeText,
-                activeTab === 'polls' && styles.tabBadgeTextActive,
+                styles.mainTabText,
+                activeTab === 'polls' && styles.mainTabTextActive,
               ]}
             >
-              {polls.length}
+              التصويت والقرارات
             </Text>
-          </View>
-        </TouchableOpacity>
+            <View
+              style={[
+                styles.tabBadge,
+                activeTab === 'polls' && styles.tabBadgeActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tabBadgeText,
+                  activeTab === 'polls' && styles.tabBadgeTextActive,
+                ]}
+              >
+                {polls.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.mainTab, activeTab === 'campaigns' && styles.mainTabActive]}
+            onPress={() => setActiveTab('campaigns')}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons
+              name="construction"
+              size={16}
+              color={activeTab === 'campaigns' ? '#FFFFFF' : '#64748B'}
+            />
+            <Text
+              style={[
+                styles.mainTabText,
+                activeTab === 'campaigns' && styles.mainTabTextActive,
+              ]}
+            >
+              صناديق الطوارئ
+            </Text>
+            <View
+              style={[
+                styles.tabBadge,
+                activeTab === 'campaigns' && styles.tabBadgeActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tabBadgeText,
+                  activeTab === 'campaigns' && styles.tabBadgeTextActive,
+                ]}
+              >
+                {emergencyClaims.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       <ScrollView
@@ -623,6 +668,16 @@ export const CommunityHubScreen: React.FC = () => {
                           </Text>
                         </TouchableOpacity>
                       )}
+
+                      {/* Ticket Details & Timeline Trigger */}
+                      <TouchableOpacity
+                        style={styles.detailsTicketBtn}
+                        onPress={() => setSelectedIssueDetails(issue)}
+                        activeOpacity={0.8}
+                      >
+                        <MaterialIcons name="info-outline" size={15} color={COLORS.primary} />
+                        <Text style={styles.detailsTicketBtnText}>المسار والتفاصيل</Text>
+                      </TouchableOpacity>
 
                       {/* Admin Status Management Buttons */}
                       {currentRole === 'admin' && (
@@ -998,6 +1053,132 @@ export const CommunityHubScreen: React.FC = () => {
             )}
           </View>
         )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: EMERGENCY CAMPAIGNS & REPAIR FUNDS (_27/code.html)                 */}
+        {/* ========================================================================= */}
+        {activeTab === 'campaigns' && (
+          <View style={styles.tabContent}>
+            {/* Hero Emergency Status Banner */}
+            <View style={styles.emergencyHeroCard}>
+              <View style={styles.emergencyHeroTop}>
+                <View style={styles.emergencyIconBox}>
+                  <MaterialIcons name="construction" size={24} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                  <View style={styles.emergencyHeroChip}>
+                    <View style={styles.pingDotRed} />
+                    <Text style={styles.emergencyHeroChipText}>صناديق الصيانة الاستثنائية</Text>
+                  </View>
+                  <Text style={styles.emergencyHeroTitle}>مطالبات الطوارئ الجماعية</Text>
+                  <Text style={styles.emergencyHeroSub}>
+                    جمع التكاليف الطارئة غير المغطاة بالاشتراك الشهري بنظام الحصص العادلة
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Emergency Claims Feed */}
+            {emergencyClaims.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <MaterialIcons name="verified-user" size={44} color={COLORS.secondary} />
+                <Text style={styles.emptyTitle}>لا توجد مطالبات طوارئ نشطة حالياً</Text>
+                <Text style={styles.emptySub}>
+                  صندوق الطوارئ مستقر ولا توجد أعطال جسيمة تستدعي جمع مساهمات استثنائية.
+                </Text>
+              </View>
+            ) : (
+              emergencyClaims.map((claim) => {
+                const approvedPayments = payments.filter(
+                  (p) => p.emergency_claim_id === claim.id && p.status === 'paid'
+                );
+                const actualCollected = Math.max(
+                  claim.collected_amount,
+                  approvedPayments.reduce((acc, p) => acc + p.amount, 0)
+                );
+                const totalUnits = currentBuilding.total_apartments || 16;
+                const pct = Math.min(
+                  100,
+                  Math.round((actualCollected / Math.max(claim.target_amount, 1)) * 100)
+                );
+                const isUserPaid = approvedPayments.some(
+                  (p) =>
+                    p.resident_id === currentUser.id ||
+                    p.apartment_number === currentUser.apartment_number
+                );
+                const userShare =
+                  claim.default_share_amount ||
+                  Math.round(claim.target_amount / Math.max(totalUnits, 1));
+
+                return (
+                  <View key={claim.id} style={styles.claimCard}>
+                    <View style={styles.claimHeaderRow}>
+                      <View style={styles.claimCategoryBadge}>
+                        <MaterialIcons name="handyman" size={14} color={COLORS.error} />
+                        <Text style={styles.claimCategoryBadgeText}>{claim.category}</Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.claimStatusPill,
+                          isUserPaid ? styles.claimStatusPillPaid : styles.claimStatusPillPending,
+                        ]}
+                      >
+                        <MaterialIcons
+                          name={isUserPaid ? 'check-circle' : 'pending'}
+                          size={13}
+                          color={isUserPaid ? COLORS.statusPaid : COLORS.statusPending}
+                        />
+                        <Text
+                          style={[
+                            styles.claimStatusPillText,
+                            isUserPaid
+                              ? styles.claimStatusPillTextPaid
+                              : styles.claimStatusPillTextPending,
+                          ]}
+                        >
+                          {isUserPaid ? 'مسددة منكم ✓' : 'مستحقة للسداد'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.claimTitleText}>{claim.title}</Text>
+                    {Boolean(claim.description) && (
+                      <Text style={styles.claimDescText}>{claim.description}</Text>
+                    )}
+
+                    {/* Progress Gauge */}
+                    <View style={styles.claimProgressContainer}>
+                      <View style={styles.claimProgressLabels}>
+                        <Text style={styles.claimProgressVal}>
+                          {actualCollected.toLocaleString()} من{' '}
+                          {claim.target_amount.toLocaleString()} ج.م
+                        </Text>
+                        <Text style={styles.claimProgressPct}>{pct}% مكتمل</Text>
+                      </View>
+                      <View style={styles.claimProgressBarTrack}>
+                        <View style={[styles.claimProgressBarFill, { width: `${pct}%` }]} />
+                      </View>
+                    </View>
+
+                    {/* Share per unit & action */}
+                    <View style={styles.claimFooterRow}>
+                      <View style={{ alignItems: 'flex-start' }}>
+                        <Text style={styles.claimShareLabel}>حصة وحدتكم المقررة</Text>
+                        <Text style={styles.claimShareValue}>{userShare.toLocaleString()} ج.م</Text>
+                      </View>
+
+                      {!isUserPaid && (
+                        <View style={styles.claimActionBadge}>
+                          <Text style={styles.claimActionBadgeText}>سداد عبر تطبيق الساكن 💳</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
       </ScrollView>
 
       {/* ========================================================================= */}
@@ -1364,6 +1545,205 @@ export const CommunityHubScreen: React.FC = () => {
           )}
         </View>
       </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL 4: TICKET DETAILS & PROGRESSION TIMELINE (_19/code.html)            */}
+      {/* ========================================================================= */}
+      <BottomSheetModal
+        visible={Boolean(selectedIssueDetails)}
+        onClose={() => setSelectedIssueDetails(null)}
+        title="متابعة صيانة وبلاغات العقار"
+      >
+        {selectedIssueDetails && (
+          <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+            {/* Header with status */}
+            <View style={styles.ticketDetailHeader}>
+              <View style={styles.ticketDetailIconBox}>
+                <MaterialIcons name="build" size={24} color={COLORS.primary} />
+              </View>
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                <Text style={styles.ticketDetailTitle}>{selectedIssueDetails.title}</Text>
+                <View style={styles.ticketDetailLocationRow}>
+                  <MaterialIcons name="location-on" size={14} color={COLORS.onSurfaceVariant} />
+                  <Text style={styles.ticketDetailLocationText}>
+                    {selectedIssueDetails.category} • شقة {selectedIssueDetails.apartment_number || '302'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Reporter & Time meta */}
+            <View style={styles.ticketMetaCard}>
+              <View style={styles.ticketMetaItem}>
+                <Text style={styles.ticketMetaLabel}>الساكن المبلغ:</Text>
+                <Text style={styles.ticketMetaVal}>
+                  {selectedIssueDetails.reporter_name || 'الساكن المالك'}
+                </Text>
+              </View>
+              <View style={styles.ticketMetaItem}>
+                <Text style={styles.ticketMetaLabel}>درجة الأهمية:</Text>
+                <Text
+                  style={[
+                    styles.ticketMetaVal,
+                    {
+                      color:
+                        selectedIssueDetails.severity === 'high'
+                          ? COLORS.statusUnpaid
+                          : selectedIssueDetails.severity === 'medium'
+                          ? COLORS.statusUpcoming
+                          : COLORS.secondary,
+                    },
+                  ]}
+                >
+                  {selectedIssueDetails.severity === 'high'
+                    ? 'عاجل وحرج ⚠️'
+                    : selectedIssueDetails.severity === 'medium'
+                    ? 'متوسط'
+                    : 'عادي'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Progression Timeline (design/_19/code.html) */}
+            <View style={styles.timelineSection}>
+              <Text style={styles.timelineSectionTitle}>مسار مراحل تنفيذ البلاغ:</Text>
+
+              {/* Step 1 */}
+              <View style={styles.timelineStep}>
+                <View style={[styles.timelineNode, styles.timelineNodeDone]}>
+                  <MaterialIcons name="check" size={14} color="#FFFFFF" />
+                </View>
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineStepTitle}>تم استلام البلاغ وقيده في سجل الصيانة</Text>
+                  <Text style={styles.timelineStepSub}>إشعار فوري لمجلس إدارة الاتحاد</Text>
+                </View>
+              </View>
+
+              {/* Step 2 */}
+              <View style={styles.timelineStep}>
+                <View
+                  style={[
+                    styles.timelineNode,
+                    selectedIssueDetails.status === 'in_progress' ||
+                    selectedIssueDetails.status === 'resolved'
+                      ? styles.timelineNodeDone
+                      : styles.timelineNodePending,
+                  ]}
+                >
+                  <MaterialIcons
+                    name={
+                      selectedIssueDetails.status === 'in_progress' ||
+                      selectedIssueDetails.status === 'resolved'
+                        ? 'check'
+                        : 'schedule'
+                    }
+                    size={14}
+                    color="#FFFFFF"
+                  />
+                </View>
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineStepTitle}>
+                    جاري الفحص والمعاينة وتكليف الفني المختص
+                  </Text>
+                  <Text style={styles.timelineStepSub}>
+                    {selectedIssueDetails.status === 'in_progress'
+                      ? 'تم التواصل مع شركة الصيانة وتحديد موعد الزيارة'
+                      : 'بانتظار تكليف الإدارة للفني'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Step 3 */}
+              <View style={styles.timelineStep}>
+                <View
+                  style={[
+                    styles.timelineNode,
+                    selectedIssueDetails.status === 'resolved'
+                      ? styles.timelineNodeDone
+                      : styles.timelineNodeUpcoming,
+                  ]}
+                >
+                  <MaterialIcons
+                    name={selectedIssueDetails.status === 'resolved' ? 'done-all' : 'task-alt'}
+                    size={14}
+                    color="#FFFFFF"
+                  />
+                </View>
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineStepTitle}>اكتمال الإصلاح واعتماد الحل رسمياً</Text>
+                  <Text style={styles.timelineStepSub}>
+                    {selectedIssueDetails.status === 'resolved'
+                      ? 'تم حل العطل واختبار كفاءة التشغيل بنجاح'
+                      : 'يتم الإغلاق بعد الانتهاء والتحقق'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Attached Photo Preview */}
+            {selectedIssueDetails.image_url && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={styles.timelineSectionTitle}>صورة العطل المرفقة:</Text>
+                <TouchableOpacity
+                  onPress={() => setSelectedIssueImage(selectedIssueDetails.image_url!)}
+                  style={styles.detailImageContainer}
+                >
+                  <Image
+                    source={{ uri: selectedIssueDetails.image_url }}
+                    style={styles.detailFullImage}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Admin Action Buttons */}
+            {currentRole === 'admin' && (
+              <View style={styles.modalAdminActionsRow}>
+                {selectedIssueDetails.status !== 'in_progress' &&
+                  selectedIssueDetails.status !== 'resolved' && (
+                    <TouchableOpacity
+                      style={[styles.modalActionBtn, { backgroundColor: COLORS.statusUpcoming }]}
+                      onPress={async () => {
+                        const id = selectedIssueDetails.id;
+                        setSelectedIssueDetails(null);
+                        await updateIssueStatus(id, 'in_progress');
+                      }}
+                    >
+                      <Text style={styles.modalActionBtnText}>⏳ بدء التنفيذ والفحص</Text>
+                    </TouchableOpacity>
+                  )}
+
+                {selectedIssueDetails.status !== 'resolved' && (
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { backgroundColor: COLORS.secondary }]}
+                    onPress={async () => {
+                      const id = selectedIssueDetails.id;
+                      setSelectedIssueDetails(null);
+                      await updateIssueStatus(id, 'resolved');
+                    }}
+                  >
+                    <Text style={styles.modalActionBtnText}>✅ اعتماد الحل وإغلاق البلاغ</Text>
+                  </TouchableOpacity>
+                )}
+
+                {selectedIssueDetails.status === 'resolved' && (
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { backgroundColor: COLORS.primary }]}
+                    onPress={async () => {
+                      const id = selectedIssueDetails.id;
+                      setSelectedIssueDetails(null);
+                      await updateIssueStatus(id, 'open');
+                    }}
+                  >
+                    <Text style={styles.modalActionBtnText}>🔄 إعادة فتح البلاغ</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </ScrollView>
+        )}
+      </BottomSheetModal>
     </View>
   );
 };
@@ -1374,51 +1754,55 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceCanvas,
   },
   tabsHeader: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surfaceCard,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.borderSubtle,
-    gap: 10,
+  },
+  tabsHeaderScroll: {
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+    alignItems: 'center',
   },
   mainTab: {
-    flex: 1,
-    flexDirection: 'row',
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: COLORS.surfaceContainerLow,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 9999,
+    backgroundColor: '#F1F5F9',
     gap: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   mainTabActive: {
-    backgroundColor: COLORS.surfaceContainer,
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
+    backgroundColor: '#091426',
+    borderColor: '#091426',
   },
   mainTabText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: COLORS.onSurfaceVariant,
+    color: '#64748B',
   },
   mainTabTextActive: {
-    color: COLORS.primary,
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   tabBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
     borderRadius: 10,
-    backgroundColor: '#CBD5E1',
+    backgroundColor: '#E2E8F0',
   },
   tabBadgeActive: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
   tabBadgeText: {
     fontSize: 10,
     fontWeight: '700',
-    color: COLORS.onSurfaceVariant,
+    color: '#475569',
   },
   tabBadgeTextActive: {
     color: '#FFFFFF',
@@ -2483,5 +2867,326 @@ const styles = StyleSheet.create({
   fullModalImage: {
     width: '100%',
     height: '80%',
+  },
+  detailsTicketBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.surfaceContainer,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  detailsTicketBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  // Emergency Hero & Claims (design/_27)
+  emergencyHeroCard: {
+    backgroundColor: COLORS.primaryContainer,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  emergencyHeroTop: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  emergencyIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emergencyHeroChip: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+    alignSelf: 'flex-start',
+  },
+  pingDotRed: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.statusUnpaid,
+  },
+  emergencyHeroChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.errorContainer,
+  },
+  emergencyHeroTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  emergencyHeroSub: {
+    fontSize: 11,
+    color: COLORS.onPrimaryContainer,
+    marginTop: 2,
+    textAlign: 'right',
+    lineHeight: 16,
+  },
+  claimCard: {
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    gap: 10,
+  },
+  claimHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  claimCategoryBadge: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  claimCategoryBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.error,
+  },
+  claimStatusPill: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 9999,
+  },
+  claimStatusPillPaid: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  claimStatusPillPending: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+  },
+  claimStatusPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  claimStatusPillTextPaid: {
+    color: COLORS.statusPaid,
+  },
+  claimStatusPillTextPending: {
+    color: COLORS.statusUpcoming,
+  },
+  claimTitleText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    textAlign: 'right',
+  },
+  claimDescText: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+    textAlign: 'right',
+  },
+  claimProgressContainer: {
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderRadius: 10,
+    padding: 10,
+    gap: 6,
+  },
+  claimProgressLabels: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  claimProgressVal: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+  },
+  claimProgressPct: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.secondary,
+  },
+  claimProgressBarTrack: {
+    height: 7,
+    borderRadius: 9999,
+    backgroundColor: COLORS.surfaceContainer,
+    overflow: 'hidden',
+  },
+  claimProgressBarFill: {
+    height: '100%',
+    borderRadius: 9999,
+    backgroundColor: COLORS.secondary,
+  },
+  claimFooterRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderSubtle,
+    paddingTop: 8,
+  },
+  claimShareLabel: {
+    fontSize: 10,
+    color: COLORS.onSurfaceVariant,
+  },
+  claimShareValue: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.secondary,
+  },
+  claimActionBadge: {
+    backgroundColor: COLORS.surfaceContainer,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  claimActionBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+
+  // Ticket Detail Modal (_19)
+  ticketDetailHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderRadius: 12,
+    padding: 12,
+  },
+  ticketDetailIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: COLORS.primaryContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ticketDetailTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    textAlign: 'right',
+  },
+  ticketDetailLocationRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  ticketDetailLocationText: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+  },
+  ticketMetaCard: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-around',
+    backgroundColor: COLORS.surfaceCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 10,
+  },
+  ticketMetaItem: {
+    alignItems: 'center',
+  },
+  ticketMetaLabel: {
+    fontSize: 10,
+    color: COLORS.onSurfaceVariant,
+  },
+  ticketMetaVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    marginTop: 2,
+  },
+  timelineSection: {
+    marginTop: 12,
+    gap: 10,
+  },
+  timelineSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    textAlign: 'right',
+  },
+  timelineStep: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  timelineNode: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  timelineNodeDone: {
+    backgroundColor: COLORS.secondary,
+  },
+  timelineNodePending: {
+    backgroundColor: COLORS.statusUpcoming,
+  },
+  timelineNodeUpcoming: {
+    backgroundColor: COLORS.outlineVariant,
+  },
+  timelineContent: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  timelineStepTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+  timelineStepSub: {
+    fontSize: 10,
+    color: COLORS.onSurfaceVariant,
+    marginTop: 1,
+  },
+  detailImageContainer: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    height: 180,
+    marginTop: 6,
+  },
+  detailFullImage: {
+    width: '100%',
+    height: '100%',
+  },
+  modalAdminActionsRow: {
+    flexDirection: 'row-reverse',
+    gap: 8,
+    marginTop: 14,
+    marginBottom: 20,
+  },
+  modalActionBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
