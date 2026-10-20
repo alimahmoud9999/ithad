@@ -9,3 +9,6 @@ admin-dashboard/node_modules
 .expo
 dist
 build
+
+*.zip
+*.log
