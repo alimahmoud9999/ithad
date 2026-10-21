@@ -34,7 +34,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onOpenAuthScreen }) => {
     currentBuilding,
     switchRole,
     isAuthenticated,
-    setAuthenticated,
+    logout,
     unreadNotificationsCount,
     activeBannerNotification,
     dismissBannerNotification,
@@ -138,25 +138,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onOpenAuthScreen }) => {
         </View>
 
         <View style={styles.actionsSide}>
-          <TouchableOpacity
-            style={styles.authSwitchBtn}
-            onPress={() => {
-              if (onOpenAuthScreen) {
-                onOpenAuthScreen();
-              } else {
-                setAuthenticated(!isAuthenticated);
-              }
-            }}
-          >
-            <MaterialIcons
-              name={isAuthenticated ? 'person-add-alt-1' : 'dashboard'}
-              size={16}
-              color={COLORS.primaryContainer}
-            />
-            <Text style={styles.authSwitchText}>
-              {isAuthenticated ? 'شاشة التسجيل' : 'العودة للوحة'}
-            </Text>
-          </TouchableOpacity>
+          {/* Logged-out users must go through login; never flip auth state client-side */}
+          {isAuthenticated && (
+            <TouchableOpacity
+              style={styles.authSwitchBtn}
+              onPress={() => {
+                onOpenAuthScreen ? onOpenAuthScreen() : logout();
+              }}
+            >
+              <MaterialIcons name="logout" size={16} color={COLORS.primaryContainer} />
+              <Text style={styles.authSwitchText}>تسجيل الخروج</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.bellButton}

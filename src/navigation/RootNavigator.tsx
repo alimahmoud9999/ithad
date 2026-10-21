@@ -102,7 +102,7 @@ export const RootNavigator: React.FC = () => {
 
   return (
     <View style={styles.rootContainer}>
-      <TopHeader onOpenAuthScreen={() => setAuthenticated(!isAuthenticated)} />
+      <TopHeader />
 
       <View
         style={[

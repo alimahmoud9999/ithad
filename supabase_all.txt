@@ -8228,7 +8228,7 @@ DECLARE
     v_all_user_ids UUID[];
     v_bypass_auth BOOLEAN := FALSE;
 BEGIN
-    IF p_secret_key = 'ITTIHAD_DEV_RESET_2026' THEN
+    IF p_secret_key = '[REDACTED-reset-key]' THEN
         v_bypass_auth := TRUE;
     END IF;
 
