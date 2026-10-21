@@ -13,7 +13,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '@/shared/theme/colors';
 import { useAppStore } from '@/store/AppContext';
-import { isSupabaseConfigured, secureRpc, supabase } from '@/shared/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
 import { copyToClipboard, sendWhatsAppInvite } from '@/shared/utils/inviteHelper';
 import { Apartment, Building } from '@/shared/types/database';
 

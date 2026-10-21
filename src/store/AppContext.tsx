@@ -36,15 +36,16 @@ import {
   UserRole,
 } from '@/shared/types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  authSignIn,
-  authSignOut,
-  authSignUp,
-  ensureSupabaseSession,
-  isSupabaseConfigured,
-  secureRpc,
-  supabase,
-} from '@/shared/lib/supabase';
+import { ensureSupabaseSession, isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { communityApi } from '@/modules/community/infrastructure/community.api';
+import { emergencyApi } from '@/modules/emergency/infrastructure/emergency.api';
+import { expensesApi } from '@/modules/expenses/infrastructure/expenses.api';
+import { notificationsApi } from '@/modules/notifications/infrastructure/notifications.api';
+import { onboardingApi } from '@/modules/auth/infrastructure/onboarding.api';
+import { paymentsApi } from '@/modules/payments/infrastructure/payments.api';
+import { platformApi } from '@/modules/platform/infrastructure/platform.api';
+import { unitsApi } from '@/modules/units/infrastructure/units.api';
+import { authSignIn, authSignOut, authSignUp } from '@/modules/auth/infrastructure/auth.api';
 import {
   dispatchPushNotification,
   registerAndSavePushTokenAsync,
@@ -1645,7 +1646,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const markAllNotificationsAsRead = useCallback(async () => {
     if (isSupabaseConfigured) {
       try {
-        await secureRpc.markAllNotificationsRead();
+        await notificationsApi.markAllNotificationsRead();
       } catch {
         // Ignore if offline
       }
@@ -1822,7 +1823,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             }
           }
         }
-        const { data, error } = await secureRpc.createBuildingForAdmin(input);
+        const { data, error } = await onboardingApi.createBuildingForAdmin(input);
         if (error) {
           throw new Error(error.message);
         }
@@ -1994,7 +1995,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
 
-        const { data: rpcJoinData, error } = await secureRpc.requestJoinBuilding({
+        const { data: rpcJoinData, error } = await onboardingApi.requestJoinBuilding({
           ...input,
           buildingCode: cleanCode,
           apartmentNumber: targetAptNumber,
@@ -2273,7 +2274,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
         if (isSupabaseConfigured) {
           try {
-            await secureRpc.reviewResidentJoinRequest(
+            await unitsApi.reviewResidentJoinRequest(
               residentId,
               approve,
               targetAptObj?.id ?? null,
@@ -2407,7 +2408,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (isSupabaseConfigured) {
         try {
-          await secureRpc.transferApartmentObligations({
+          await unitsApi.transferApartmentObligations({
             sourceApartmentId: input.sourceApartmentId,
             targetApartmentId: input.targetApartmentId,
             obligationIds: input.obligationIds ?? null,
@@ -3129,7 +3130,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       let serverPaymentId: string | null = null;
       if (isSupabaseConfigured) {
         try {
-          const rpcRes = await secureRpc.submitResidentPayment({
+          const rpcRes = await paymentsApi.submitResidentPayment({
             amount: input.amount,
             paymentMethod: input.paymentMethod,
             billingMonth: normalizedMonth,
@@ -3326,7 +3327,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
         if (isSupabaseConfigured && isUuid(paymentId)) {
           try {
-            await secureRpc.approveResidentPayment(paymentId);
+            await paymentsApi.approveResidentPayment(paymentId);
           } catch (rpcErr: any) {
             console.warn('approveResidentPayment RPC warning:', rpcErr);
             // If the RPC threw because of column mismatch (e.g. payment_status on apartments), fallback to direct updates
@@ -3667,7 +3668,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
         if (isSupabaseConfigured && isValidUuid) {
           try {
-            await secureRpc.rejectResidentPayment(paymentId, finalReason);
+            await paymentsApi.rejectResidentPayment(paymentId, finalReason);
           } catch (rpcErr) {
             console.warn('rejectResidentPayment RPC warning:', rpcErr);
             throw rpcErr;
@@ -3917,7 +3918,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       const currentMonth = new Date().toISOString().slice(0, 7);
       if (isSupabaseConfigured) {
         try {
-          await secureRpc.sendBulkUnpaidReminder(currentMonth, customMessage);
+          await paymentsApi.sendBulkUnpaidReminder(currentMonth, customMessage);
         } catch {
           // Fallback to local state dispatch
         }
@@ -4075,7 +4076,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       let serverClaimId: string | null = null;
       if (isSupabaseConfigured) {
         try {
-          const rpcRes = await secureRpc.createEmergencyClaim({
+          const rpcRes = await emergencyApi.createEmergencyClaim({
             title: input.title,
             description: input.description,
             category: input.category,
@@ -4169,7 +4170,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (isSupabaseConfigured) {
         try {
-          await secureRpc.recordBuildingExpense({
+          await expensesApi.recordBuildingExpense({
             title: `إغلاق مطالبة طارئة: ${targetClaim.title}`,
             amount: finalAmount,
             category: targetClaim.category || 'صيانة ومصاعد',
@@ -4246,7 +4247,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (isSupabaseConfigured) {
         try {
-          await secureRpc.recordBuildingExpense(input);
+          await expensesApi.recordBuildingExpense(input);
         } catch {
           // Graceful fallback
         }
@@ -4601,7 +4602,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }) => {
       if (isSupabaseConfigured) {
         try {
-          await secureRpc.submitAppSubscriptionInvoice(input);
+          await platformApi.submitAppSubscriptionInvoice(input);
         } catch {
           // Graceful fallback
         }
@@ -4666,7 +4667,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       try {
         if (isSupabaseConfigured) {
           try {
-            await secureRpc.activateBuildingSubscription(invoiceId);
+            await platformApi.activateBuildingSubscription(invoiceId);
           } catch {
             // Graceful fallback
           }
@@ -4768,7 +4769,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (isSupabaseConfigured) {
         try {
-          await secureRpc.superAdminConfigureBuilding(input);
+          await platformApi.superAdminConfigureBuilding(input);
         } catch {
           // Graceful fallback
         }
@@ -4855,7 +4856,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isSupabaseConfigured) {
         try {
           await ensureSupabaseSession();
-          const rpcRes = await secureRpc.createBuildingIssue({
+          const rpcRes = await communityApi.createBuildingIssue({
             buildingId: bId,
             title: input.title.trim(),
             description: input.description?.trim() || null,
@@ -4919,7 +4920,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isSupabaseConfigured) {
         try {
           await ensureSupabaseSession();
-          const rpcRes = await secureRpc.toggleIssueUpvote(issueId);
+          const rpcRes = await communityApi.toggleIssueUpvote(issueId);
 
           if (!rpcRes.data && rpcRes.error) {
             const { data: existing } = await supabase
@@ -4967,7 +4968,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isSupabaseConfigured) {
         try {
           await ensureSupabaseSession();
-          const rpcRes = await secureRpc.updateIssueStatus(issueId, status);
+          const rpcRes = await communityApi.updateIssueStatus(issueId, status);
 
           if (!rpcRes.data && rpcRes.error) {
             await supabase
@@ -5044,7 +5045,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isSupabaseConfigured) {
         try {
           await ensureSupabaseSession();
-          const rpcRes = await secureRpc.createBuildingPoll({
+          const rpcRes = await communityApi.createBuildingPoll({
             buildingId: bId,
             title: input.title.trim(),
             description: input.description?.trim() || null,
@@ -5131,7 +5132,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isSupabaseConfigured) {
         try {
           await ensureSupabaseSession();
-          const rpcRes = await secureRpc.castPollVote(pollId, choice);
+          const rpcRes = await communityApi.castPollVote(pollId, choice);
 
           if (!rpcRes.data && rpcRes.error) {
             await supabase.from('poll_votes').upsert(
@@ -5164,7 +5165,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       const buildingId = currentBuilding.id;
 
       if (isSupabaseConfigured) {
-        const { data, error } = await secureRpc.resetBuildingData(buildingId, mode);
+        const { data, error } = await platformApi.resetBuildingData(buildingId, mode);
         if (error) {
           throw new Error(error.message || 'فشلت عملية إعادة تهيئة البيانات');
         }
