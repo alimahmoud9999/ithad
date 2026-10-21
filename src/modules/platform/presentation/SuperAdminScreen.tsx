@@ -88,12 +88,12 @@ export const SuperAdminScreen: React.FC = () => {
     buildings.find((b) => b.id === selectedBuildingId) || buildings[0];
 
   const [customPriceInput, setCustomPriceInput] = useState<string>(
-    selectedBuilding?.custom_monthly_price !== null
+    selectedBuilding?.custom_monthly_price != null
       ? String(selectedBuilding.custom_monthly_price)
       : ''
   );
   const [maxAptsInput, setMaxAptsInput] = useState<string>(
-    selectedBuilding?.max_apartments_override !== null
+    selectedBuilding?.max_apartments_override != null
       ? String(selectedBuilding.max_apartments_override)
       : String(selectedBuilding?.total_apartments || 24)
   );
