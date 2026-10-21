@@ -3,7 +3,6 @@ import { ScrollView } from 'react-native';
 import { useAppStore } from '@/store/AppContext';
 import { styles } from './ResidentHomeScreen.styles';
 import type { ActiveSubView } from '../domain/resident.types';
-import { useResidentLedger } from '../application/useResidentLedger';
 import { useResidentPaymentSheet } from '../application/useResidentPaymentSheet';
 import { DocumentsArchiveModal } from './components/DocumentsArchiveModal';
 import { AddTicketModal } from './components/AddTicketModal';
@@ -39,25 +38,15 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
   onNavigateExpenses,
   onNavigateCommunity,
 }) => {
-  const {
-    currentUser,
-  } = useAppStore();
+  const { currentUser } = useAppStore();
 
   const [activeSubView, setActiveSubView] = useState<ActiveSubView>('none');
 
   const {
-    currentMonthLabel,
-  } = useResidentLedger();
-
-  const {
     paymentCategory,
-    setPaymentCategory,
     selectedClaim,
-    setSelectedClaim,
     selectedObligation,
-    setSelectedObligation,
     isArrearsPaymentMode,
-    setIsArrearsPaymentMode,
     paymentAmount,
     setPaymentAmount,
     paymentMethod,
@@ -70,9 +59,7 @@ export const ResidentHomeScreen: React.FC<ResidentHomeScreenProps> = ({
 
   // If resident account is still pending admin approval
   if (currentUser.status === 'pending') {
-    return (
-      <PendingApprovalView />
-    );
+    return <PendingApprovalView />;
   }
 
   // --------------------------------------------------------------------------

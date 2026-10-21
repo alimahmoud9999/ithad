@@ -56,7 +56,18 @@ export const AuthAndOnboardingScreen: React.FC<{ onClose?: () => void }> = ({
   const [createdBuildingCode, setCreatedBuildingCode] = useState<string | null>(null);
   const [justSubmittedJoin, setJustSubmittedJoin] = useState(false);
 
-  const lookup = useBuildingCodeLookup({ buildingCode, setApartmentNumber, setIsInviteCodeAutoMatched, setShowAllApartments, setFloorNumber, setFullName, setPhone, setMatchedAptDetail, showAllApartments, apartmentNumber });
+  const lookup = useBuildingCodeLookup({
+    buildingCode,
+    setApartmentNumber,
+    setIsInviteCodeAutoMatched,
+    setShowAllApartments,
+    setFloorNumber,
+    setFullName,
+    setPhone,
+    setMatchedAptDetail,
+    showAllApartments,
+    apartmentNumber,
+  });
 
   // --------------------------------------------------------------------------
   // SCREEN 6: WELCOME SUCCESS & DIGITAL MEMBERSHIP CARD (design/_25)

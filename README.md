@@ -73,24 +73,38 @@
 ```text
 ittihad-trust-mobile/
 ├── src/
-│   ├── components/           # المكونات المشتركة (Headers, Modals, Cards, Buttons)
-│   ├── lib/                  # مكتبة الاتصال بـ Supabase ودوال الـ RPC والتخزين
-│   ├── navigation/           # الملاحة بين الشاشات والتحقق من الجلسات
-│   ├── screens/
-│   │   ├── admin/            # شاشات رئيس الاتحاد (Dashboard, Units, Expenses, Emergency)
-│   │   ├── auth/             # شاشات تسجيل الدخول، إنشاء العمارة، واختيار الشقة
-│   │   ├── resident/         # شاشات المالك (Home, Payments, Transparency, Tickets)
-│   │   └── super_admin/      # شاشات مالك المنصة وإدارة الاشتراكات
-│   ├── store/                # إدارة الحالة العامة للتطبيق (AppContext.tsx)
-│   └── types/                # تعريفات TypeScript ونماذج الجداول والبيانات
+│   ├── app/                  # غلاف التطبيق: RootNavigator و TopHeader وشريط تبديل الأدوار
+│   ├── store/                # AppContext: الحالة العامة فقط (تحميل البيانات، realtime، القيم المشتقة)
+│   ├── shared/               # كود مشترك بلا منطق أعمال: عميل Supabase، الألوان، الأنواع، مكونات UI، أدوات
+│   └── modules/              # وحدة لكل مجال عمل، وكل وحدة مقسمة لنفس الطبقات:
+│       ├── auth/             #   تسجيل الدخول، إنشاء العمارة، انضمام الساكن
+│       ├── units/            #   الشقق، المديونيات، مراجعة طلبات الانضمام
+│       ├── payments/         #   السداد، الاعتماد/الرفض، التذكير، الشقق المتأخرة
+│       ├── emergency/        #   مطالبات الطوارئ وإغلاقها بفاتورة
+│       ├── expenses/         #   المصروفات والشفافية وحركة الخزينة
+│       ├── community/        #   البلاغات والتصويت
+│       ├── notifications/    #   الإشعارات الفورية ومركز التنبيهات
+│       ├── platform/         #   مالك المنصة: الباقات، تخصيص العمارات، فواتير الاشتراك
+│       ├── settings/         #   شاشة الإعدادات
+│       ├── admin/            #   لوحة رئيس الاتحاد (تجمع مكونات الوحدات الأخرى)
+│       └── resident/         #   الصفحة الرئيسية للساكن (تجمع مكونات الوحدات الأخرى)
 ├── admin-dashboard/          # لوحة التحكم المستقلة على الويب (Next.js)
 ├── supabase/
 │   └── migrations/           # جميع ملفات الـ SQL Migrations ودوال الـ PostgreSQL
-├── assets/                   # الأيقونات، الخطوط، وشاشات البداية (Splash)
 ├── App.tsx                   # نقطة الانطلاق الرئيسية للتطبيق
-├── package.json              # الاعتماديات وحزم المشروع
-└── PROJECT_DOCUMENTATION.md  # الدليل المرجعي الفني المفصل لكل أجزاء الكود
+└── package.json              # الاعتماديات وحزم المشروع
 ```
+
+طبقات كل وحدة (نفس نمط مشروع learning-platform)، ويُنشأ المجلد فقط عند الحاجة:
+
+| الطبقة | المحتوى | مثال |
+| :--- | :--- | :--- |
+| `domain/` | أنواع وثوابت وقواعد نقية بلا React ولا Supabase | `auth/domain/inviteCode.ts` + `inviteCode.check.ts` |
+| `infrastructure/` | استدعاءات Supabase (RPC والجداول) | `payments/infrastructure/payments.api.ts` |
+| `application/` | hooks: أفعال الوحدة (`use*Actions`) وحالة النماذج والقيم المشتقة | `resident/application/useResidentLedger.ts` |
+| `presentation/` | الشاشة + `components/` صغيرة + `*.styles.ts` | `units/presentation/components/AddUnitModal.tsx` |
+
+الاستيراد: داخل الوحدة بمسارات نسبية، وبين الوحدات أو من `shared` عبر الاختصار `@/` (مثل `@/shared/lib/supabase`).
 
 ---
 

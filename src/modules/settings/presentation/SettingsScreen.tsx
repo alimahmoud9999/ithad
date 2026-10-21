@@ -15,9 +15,7 @@ interface SettingsScreenProps {
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateTab }) => {
-  const {
-    currentBuilding,
-  } = useAppStore();
+  const { currentBuilding } = useAppStore();
 
   // Subscription Renewal Modal State
   const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
