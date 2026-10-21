@@ -73,4 +73,18 @@ export const onboardingApi = {
       p_phone: phone ?? null,
     });
   },
+
+  /**
+   * Full building row for an invite / building code (case-insensitive)
+   */
+  async findBuildingByCode(code: string) {
+    return supabase.from('buildings').select('*').ilike('building_code', code).maybeSingle();
+  },
+
+  /**
+   * All apartments of a building (fallback when the lookup RPC finds nothing)
+   */
+  async listBuildingApartments(buildingId: string) {
+    return supabase.from('apartments').select('*').eq('building_id', buildingId);
+  },
 };
