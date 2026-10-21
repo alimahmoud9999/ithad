@@ -34,7 +34,7 @@ import {
   SubscriptionPlan,
   UserProfile,
   UserRole,
-} from '../types/database';
+} from '@/shared/types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   authSignIn,
@@ -44,12 +44,12 @@ import {
   isSupabaseConfigured,
   secureRpc,
   supabase,
-} from '../lib/supabase';
+} from '@/shared/lib/supabase';
 import {
   dispatchPushNotification,
   registerAndSavePushTokenAsync,
   subscribeToNativeNotifications,
-} from '../services/notificationService';
+} from '@/modules/notifications/infrastructure/notificationService';
 
 export interface ReviewedResidentEntry {
   status: 'active' | 'rejected';
