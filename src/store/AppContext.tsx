@@ -883,7 +883,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       {
         table: 'payments',
         onChange: (payload) => {
-          loadDataFromSupabase(['payments']);
+          loadDataFromSupabase(['payments', 'buildings']); // approvals move the fund balance
           const { currentRole, usersByRole } = latestRef.current;
           if (payload.type === 'INSERT' && payload.record) {
             const p = payload.record as any;
@@ -903,6 +903,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               });
             }
           }
+        },
+      },
+      {
+        table: 'expenses',
+        onChange: () => {
+          loadDataFromSupabase(['expenses', 'buildings']);
+        },
+      },
+      {
+        table: 'emergency_claims',
+        onChange: () => {
+          loadDataFromSupabase(['emergency_claims', 'buildings']);
+        },
+      },
+      {
+        // Only delivers once `buildings` is in the supabase_realtime publication
+        table: 'buildings',
+        onChange: () => {
+          loadDataFromSupabase(['buildings']);
         },
       },
       {
