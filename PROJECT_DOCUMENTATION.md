@@ -964,7 +964,7 @@ d:\WorkSpace\اتحاد ملاك\
        - حل خطأ صلاحية تسجيل رئيس الاتحاد (`security violation : cannot self-assign privileged role (admin)`).
        - إضافة راية التجاوز الداخلي `app.rpc_internal_bypass` ودعم العمليات المباشرة من SQL Editor (`auth.uid() IS NULL`).
        - تثبيت حساب المدير العام `superadmin@ittihad.app` بصلاحية `super_admin`.
-       - تزويد دالة `reset_building_data` بمفتاح التجاوز السريع `p_secret_key = 'ITTIHAD_DEV_RESET_2026'` للتحكم الفوري من لوحة الأدمن.
+       - تزويد دالة `reset_building_data` بمفتاح التجاوز السريع `p_secret_key = '[REDACTED-reset-key]'` للتحكم الفوري من لوحة الأدمن.
     * **2026-10-19 (حل مشكلات المزامنة بين الأجهزة المتعددة، حظر إشعارات الأدمن عن الساكن، ومنع تكرار الشقق):**
       * **تحديث شاشة انتظار الساكن وفك التعليق عند قبول الأدمن (`src/store/AppContext.tsx` & `src/screens/resident/ResidentHomeScreen.tsx`):**
         - إصلاح مشكلة بقاء الساكن على شاشة "طلبك قيد المراجعة والاعتماد" على الموبايل حتى بعد قبول الأدمن له من المتصفح (Expo Web / Next.js).

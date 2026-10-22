@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
 import { StatusBar, StyleSheet, I18nManager } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { AppProvider } from './src/store/AppContext';
-import { RootNavigator } from './src/navigation/RootNavigator';
-import { COLORS } from './src/theme/colors';
+import { AppProvider } from '@/store/AppContext';
+import { RootNavigator } from '@/app/RootNavigator';
+import { COLORS } from '@/shared/theme/colors';
 
 export default function App() {
   useEffect(() => {

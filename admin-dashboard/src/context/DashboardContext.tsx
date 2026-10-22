@@ -333,22 +333,6 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
             return;
           }
         }
-
-        // Auto-authenticate as Super Admin for development & testing
-        const { error: signInErr } = await supabase.auth.signInWithPassword({
-          email: 'superadmin@ittihad.app',
-          password: 'AdminPassword@2026',
-        });
-
-        if (!signInErr && isMounted) {
-          const check = await verifySuperAdminRole();
-          if (check.authorized) {
-            setCurrentAdmin(check.profile || INITIAL_USERS[0]);
-            setIsAuthorizedSuperAdmin(true);
-            refreshFromSupabase();
-            return;
-          }
-        }
       } catch {
         // Fallback to interactive demo mode
       }
@@ -408,18 +392,12 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   // Interactive test for the strict Role Guard (Admin / Resident blocked immediately)
-  const simulateRoleAttempt = (role: 'super_admin' | 'admin' | 'resident') => {
-    if (role !== 'super_admin') {
-      setIsAuthorizedSuperAdmin(false);
-      setCurrentAdmin(null);
-      setAuthError(UNAUTHORIZED_ROLE_MESSAGE);
-      showToast(UNAUTHORIZED_ROLE_MESSAGE, 'error');
-      return;
-    }
-    setAuthError(null);
-    setIsAuthorizedSuperAdmin(true);
-    setCurrentAdmin(INITIAL_USERS[0]);
-    showToast('تم الدخول بصلاحية مالك المنصة (super_admin)', 'success');
+  // Only ever revokes UI access; granting it must go through signInAsSuperAdmin
+  const simulateRoleAttempt = (_role: 'super_admin' | 'admin' | 'resident') => {
+    setIsAuthorizedSuperAdmin(false);
+    setCurrentAdmin(null);
+    setAuthError(UNAUTHORIZED_ROLE_MESSAGE);
+    showToast(UNAUTHORIZED_ROLE_MESSAGE, 'error');
   };
 
   const signOut = async () => {

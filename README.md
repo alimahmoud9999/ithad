@@ -73,24 +73,68 @@
 ```text
 ittihad-trust-mobile/
 ├── src/
-│   ├── components/           # المكونات المشتركة (Headers, Modals, Cards, Buttons)
-│   ├── lib/                  # مكتبة الاتصال بـ Supabase ودوال الـ RPC والتخزين
-│   ├── navigation/           # الملاحة بين الشاشات والتحقق من الجلسات
-│   ├── screens/
-│   │   ├── admin/            # شاشات رئيس الاتحاد (Dashboard, Units, Expenses, Emergency)
-│   │   ├── auth/             # شاشات تسجيل الدخول، إنشاء العمارة، واختيار الشقة
-│   │   ├── resident/         # شاشات المالك (Home, Payments, Transparency, Tickets)
-│   │   └── super_admin/      # شاشات مالك المنصة وإدارة الاشتراكات
-│   ├── store/                # إدارة الحالة العامة للتطبيق (AppContext.tsx)
-│   └── types/                # تعريفات TypeScript ونماذج الجداول والبيانات
+│   ├── app/                  # غلاف التطبيق: RootNavigator و TopHeader وشريط تبديل الأدوار
+│   ├── store/                # AppContext: الحالة العامة فقط (تحميل البيانات، realtime، القيم المشتقة)
+│   ├── shared/               # كود مشترك بلا منطق أعمال: عميل Supabase، الألوان، الأنواع، مكونات UI، أدوات
+│   └── modules/              # وحدة لكل مجال عمل، وكل وحدة مقسمة لنفس الطبقات:
+│       ├── auth/             #   تسجيل الدخول، إنشاء العمارة، انضمام الساكن
+│       ├── units/            #   الشقق، المديونيات، مراجعة طلبات الانضمام
+│       ├── payments/         #   السداد، الاعتماد/الرفض، التذكير، الشقق المتأخرة
+│       ├── emergency/        #   مطالبات الطوارئ وإغلاقها بفاتورة
+│       ├── expenses/         #   المصروفات والشفافية وحركة الخزينة
+│       ├── community/        #   البلاغات والتصويت
+│       ├── notifications/    #   الإشعارات الفورية ومركز التنبيهات
+│       ├── platform/         #   مالك المنصة: الباقات، تخصيص العمارات، فواتير الاشتراك
+│       ├── settings/         #   شاشة الإعدادات
+│       ├── admin/            #   لوحة رئيس الاتحاد (تجمع مكونات الوحدات الأخرى)
+│       └── resident/         #   الصفحة الرئيسية للساكن (تجمع مكونات الوحدات الأخرى)
 ├── admin-dashboard/          # لوحة التحكم المستقلة على الويب (Next.js)
 ├── supabase/
 │   └── migrations/           # جميع ملفات الـ SQL Migrations ودوال الـ PostgreSQL
-├── assets/                   # الأيقونات، الخطوط، وشاشات البداية (Splash)
 ├── App.tsx                   # نقطة الانطلاق الرئيسية للتطبيق
-├── package.json              # الاعتماديات وحزم المشروع
-└── PROJECT_DOCUMENTATION.md  # الدليل المرجعي الفني المفصل لكل أجزاء الكود
+└── package.json              # الاعتماديات وحزم المشروع
 ```
+
+طبقات كل وحدة (نفس نمط مشروع learning-platform)، ويُنشأ المجلد فقط عند الحاجة:
+
+| الطبقة | المحتوى | مثال |
+| :--- | :--- | :--- |
+| `domain/` | أنواع وثوابت وقواعد نقية بلا React ولا Supabase | `auth/domain/inviteCode.ts` + `inviteCode.check.ts` |
+| `infrastructure/` | استدعاءات Supabase (RPC والجداول) | `payments/infrastructure/payments.api.ts` |
+| `application/` | hooks: أفعال الوحدة (`use*Actions`) وحالة النماذج والقيم المشتقة | `resident/application/useResidentLedger.ts` |
+| `presentation/` | الشاشة + `components/` صغيرة + `*.styles.ts` | `units/presentation/components/AddUnitModal.tsx` |
+
+الاستيراد: داخل الوحدة بمسارات نسبية، وبين الوحدات أو من `shared` عبر الاختصار `@/` (مثل `@/data/repositories`).
+
+### 🔌 طبقة البيانات (Repositories) وتغيير الباك إند
+
+التطبيق لا يعرف Supabase. كل الوصول للبيانات يمر عبر عقود (interfaces) مكتوبة بلغة العمل:
+
+```text
+src/data/
+  repositories.ts          ← المكان الوحيد الذي يحدد أي تنفيذ يُستخدم (composition root)
+  backend.ts               ← isRemoteBackendEnabled (false = وضع الديمو بالبيانات المحلية)
+  result.ts                ← RepoResult<T> = { data, error: { message } | null }
+  storage.ts, realtime.ts  ← عقود رفع الملفات والتحديث اللحظي
+  supabase/                ← عميل Supabase وتنفيذات storage / realtime
+src/modules/<m>/
+  domain/<m>.repository.ts           ← العقد (مثال: PaymentsRepository)
+  infrastructure/<m>.supabase.ts     ← تنفيذ Supabase لهذا العقد
+```
+
+القاعدة: لا يستورد `@/data/supabase/client` إلا ملفات `*.supabase.ts` والمجلد `src/data/supabase/`. الكود في `application/` و `store/` يستدعي فقط:
+
+```ts
+import { repositories } from '@/data/repositories';
+const { data, error } = await repositories.units.listUnpaidObligationAmounts(apartmentId);
+```
+
+**لتغيير الباك إند (مثلاً REST API خاص بك):**
+1. اكتب تنفيذاً جديداً لكل عقد بجانب الحالي، مثلاً `payments.http.ts` يطبّق `PaymentsRepository` باستخدام `fetch`.
+2. في `src/data/repositories.ts` استبدل `supabasePaymentsRepository` بـ `httpPaymentsRepository` (ويمكن التبديل وحدة بوحدة).
+3. عدّل `src/data/backend.ts` ليعبّر عن إعدادات الباك إند الجديد.
+
+لا يلزم تعديل أي شاشة أو hook. كل دوال التنفيذ `async` وتنتظر الطلب داخلها، حتى تعمل الاستدعاءات التي لا تنتظر النتيجة بنفس الشكل.
 
 ---
 
