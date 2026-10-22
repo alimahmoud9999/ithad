@@ -1,8 +1,10 @@
-import { supabase } from '@/shared/lib/supabase';
+import { supabase, toResult } from '@/data/supabase/client';
+import type { EmergencyClaim } from '@/shared/types/database';
+import type { EmergencyRepository } from '../domain/emergency.repository';
 import type { ClaimDistributionType } from '@/shared/types/database';
 
 // Server identity always comes from auth.uid(); never pass user ids as params.
-export const emergencyApi = {
+export const supabaseEmergencyRepository: EmergencyRepository = {
   /**
    * Admin creates an emergency claim with equal or custom share distribution
    * The admin is verified strictly via auth.uid() and building association is resolved from DB.
@@ -33,6 +35,10 @@ export const emergencyApi = {
     if (res.error) {
       throw new Error(res.error.message);
     }
-    return res;
+    return toResult(res);
+  },
+
+  async listClaims() {
+    return toResult<EmergencyClaim[]>(await supabase.from('emergency_claims').select('*').order('created_at', { ascending: false }));
   },
 };

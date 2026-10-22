@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import type { BuildingIssue, IssueSeverity, IssueStatus, Poll, PollOption, PollVote } from '@/shared/types/database';
-import { communityApi } from '../infrastructure/community.api';
-import { ensureSupabaseSession, isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -66,10 +66,10 @@ export function useCommunityActions({
 
       setBuildingIssues((prev) => [tempIssue, ...prev]);
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await ensureSupabaseSession();
-          const rpcRes = await communityApi.createBuildingIssue({
+          await repositories.auth.ensureSession();
+          const rpcRes = await repositories.community.createBuildingIssue({
             buildingId: bId,
             title: input.title.trim(),
             description: input.description?.trim() || null,
@@ -82,7 +82,7 @@ export function useCommunityActions({
           });
 
           if (!rpcRes.data && rpcRes.error) {
-            await supabase.from('building_issues').insert({
+            await repositories.community.insertIssue({
               building_id: bId,
               created_by: user.id,
               apartment_id: user.apartment_id,
@@ -130,23 +130,18 @@ export function useCommunityActions({
         })
       );
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await ensureSupabaseSession();
-          const rpcRes = await communityApi.toggleIssueUpvote(issueId);
+          await repositories.auth.ensureSession();
+          const rpcRes = await repositories.community.toggleIssueUpvote(issueId);
 
           if (!rpcRes.data && rpcRes.error) {
-            const { data: existing } = await supabase
-              .from('issue_upvotes')
-              .select('id')
-              .eq('issue_id', issueId)
-              .or(`apartment_id.eq.${aptId},user_id.eq.${user.id}`)
-              .maybeSingle();
+            const { data: existing } = await repositories.community.findUpvote(issueId, aptId, user.id);
 
             if (existing) {
-              await supabase.from('issue_upvotes').delete().eq('id', existing.id);
+              await repositories.community.deleteUpvote(existing.id);
             } else {
-              await supabase.from('issue_upvotes').insert({
+              await repositories.community.insertUpvote({
                 issue_id: issueId,
                 building_id: currentBuilding.id || user.building_id,
                 apartment_id: aptId,
@@ -178,20 +173,17 @@ export function useCommunityActions({
         })
       );
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await ensureSupabaseSession();
-          const rpcRes = await communityApi.updateIssueStatus(issueId, status);
+          await repositories.auth.ensureSession();
+          const rpcRes = await repositories.community.updateIssueStatus(issueId, status);
 
           if (!rpcRes.data && rpcRes.error) {
-            await supabase
-              .from('building_issues')
-              .update({
+            await repositories.community.updateIssue(issueId, {
                 status,
                 resolved_at: status === 'resolved' ? new Date().toISOString() : null,
                 updated_at: new Date().toISOString(),
-              })
-              .eq('id', issueId);
+              });
           }
           await loadDataFromSupabase();
         } catch (e) {
@@ -255,10 +247,10 @@ export function useCommunityActions({
 
       setPolls((prev) => [tempPoll, ...prev]);
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await ensureSupabaseSession();
-          const rpcRes = await communityApi.createBuildingPoll({
+          await repositories.auth.ensureSession();
+          const rpcRes = await repositories.community.createBuildingPoll({
             buildingId: bId,
             title: input.title.trim(),
             description: input.description?.trim() || null,
@@ -273,7 +265,7 @@ export function useCommunityActions({
           });
 
           if (!rpcRes.data && rpcRes.error) {
-            await supabase.from('polls').insert({
+            await repositories.community.insertPoll({
               building_id: bId,
               created_by: usersByRole.admin.id,
               session_code: tempPoll.session_code,
@@ -342,14 +334,13 @@ export function useCommunityActions({
         })
       );
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await ensureSupabaseSession();
-          const rpcRes = await communityApi.castPollVote(pollId, choice);
+          await repositories.auth.ensureSession();
+          const rpcRes = await repositories.community.castPollVote(pollId, choice);
 
           if (!rpcRes.data && rpcRes.error) {
-            await supabase.from('poll_votes').upsert(
-              {
+            await repositories.community.upsertVote({
                 poll_id: pollId,
                 building_id: currentBuilding.id || user.building_id,
                 apartment_id: aptId,
@@ -357,9 +348,7 @@ export function useCommunityActions({
                 voter_id: user.id,
                 voter_name: user.full_name || 'الساكن',
                 choice,
-              },
-              { onConflict: 'poll_id,apartment_id' }
-            );
+              });
           }
           await loadDataFromSupabase();
         } catch (e) {

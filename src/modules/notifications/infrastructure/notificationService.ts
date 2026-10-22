@@ -1,8 +1,8 @@
 import { Platform } from 'react-native';
 import { isRunningInExpoGo } from 'expo';
 import * as Device from 'expo-device';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
-import { notificationsApi } from './notifications.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
+import { repositories } from '@/data/repositories';
 
 /**
  * Loads ONLY the local notification submodules of `expo-notifications`
@@ -198,9 +198,9 @@ export async function registerAndSavePushTokenAsync(
   }
 
   // Persist push_token in public.users table when connected to Supabase
-  if (token && isSupabaseConfigured) {
+  if (token && isRemoteBackendEnabled) {
     try {
-      await notificationsApi.saveUserPushToken(token);
+      await repositories.notifications.saveUserPushToken(token);
     } catch {
       // Ignore if user is not authenticated yet
     }

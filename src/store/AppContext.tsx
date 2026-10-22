@@ -26,7 +26,7 @@ import type {
   UserRole,
 } from '@/shared/types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ensureSupabaseSession, isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import {
   dispatchPushNotification,
   registerAndSavePushTokenAsync,
@@ -60,6 +60,7 @@ import { useExpenseActions } from '@/modules/expenses/application/useExpenseActi
 import { useSubscriptionActions } from '@/modules/platform/application/useSubscriptionActions';
 import { useBuildingResetActions } from '@/modules/platform/application/useBuildingResetActions';
 import { useCommunityActions } from '@/modules/community/application/useCommunityActions';
+import { repositories } from '@/data/repositories';
 
 
 
@@ -171,15 +172,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       .catch(() => {});
 
     // Step 1: Check existing Supabase session and bind role strictly from DB
-    if (isSupabaseConfigured) {
-      supabase.auth.getSession().then(({ data }) => {
-        const sessionUserId = data?.session?.user?.id;
+    if (isRemoteBackendEnabled) {
+      repositories.auth.getSessionUser().then((sessionUser) => {
+        const sessionUserId = sessionUser?.id;
         if (sessionUserId) {
-          supabase
-            .from('users')
-            .select('*')
-            .eq('id', sessionUserId)
-            .maybeSingle()
+          repositories.auth
+            .getUserProfile(sessionUserId)
             .then(({ data: dbUser }) => {
               if (dbUser) {
                 setCurrentRole(dbUser.role);
@@ -196,11 +194,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Load live data from Supabase tables
   const loadDataFromSupabase = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
+    if (!isRemoteBackendEnabled) return;
 
     try {
       // Ensure we are signed into the active building session so RLS never hides claims, expenses, payments, or users
-      await ensureSupabaseSession();
+      await repositories.auth.ensureSession();
 
       const [
         bRes,
@@ -217,46 +215,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         pollsRes,
         votesRes,
       ] = await Promise.all([
-        supabase
-          .from('buildings')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('apartments')
-          .select('*')
-          .order('apartment_number', { ascending: true }),
-        supabase
-          .from('apartment_obligations')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('payments')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('emergency_claims')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('expenses')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('notifications')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase.from('users').select('*'),
-        supabase.from('subscription_plans').select('*'),
-        supabase
-          .from('building_issues')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase.from('issue_upvotes').select('*'),
-        supabase
-          .from('polls')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase.from('poll_votes').select('*'),
+        repositories.platform.listBuildings(),
+        repositories.units.listApartments(),
+        repositories.units.listObligations(),
+        repositories.payments.list(),
+        repositories.emergency.listClaims(),
+        repositories.expenses.list(),
+        repositories.notifications.list(),
+        repositories.auth.listUserProfiles(),
+        repositories.platform.listPlans(),
+        repositories.community.listIssues(),
+        repositories.community.listUpvotes(),
+        repositories.community.listPolls(),
+        repositories.community.listVotes(),
       ]);
 
       const bList = (bRes.data as Building[]) || [];
@@ -386,8 +357,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         }
 
         // Also check if current Supabase Auth user is an active resident
-        const { data: sessionData } = await supabase.auth.getSession();
-        const activeAuthUid = sessionData?.session?.user?.id;
+        const sessionUser = await repositories.auth.getSessionUser();
+        const activeAuthUid = sessionUser?.id;
         if (activeAuthUid) {
           const myUserInDb = uList.find((u) => u.id === activeAuthUid);
           if (myUserInDb && myUserInDb.status === 'active') {
@@ -765,19 +736,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Sync with Supabase on mount and subscribe to Realtime public schema changes
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!isRemoteBackendEnabled) return;
 
     loadDataFromSupabase();
 
-    const channel = supabase
-      .channel('app-realtime-channel')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications' },
-        (payload) => {
+    const unsubscribeRealtime = repositories.realtime.subscribe([
+      {
+        table: 'notifications',
+        onChange: (payload) => {
           loadDataFromSupabase();
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const notif = payload.new as AppNotification;
+          if (payload.type === 'INSERT' && payload.record) {
+            const notif = payload.record as AppNotification;
             const notifTitle = notif.title || '';
 
             // 1. Explicit Admin-Only Notifications
@@ -818,15 +787,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               }
             }
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'users' },
-        (payload) => {
+        },
+      },
+      {
+        table: 'users',
+        onChange: (payload) => {
           loadDataFromSupabase();
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newUser = payload.new as UserProfile;
+          if (payload.type === 'INSERT' && payload.record) {
+            const newUser = payload.record as UserProfile;
             if (newUser.status === 'pending' && currentRole === 'admin') {
               setActiveBannerNotification({
                 id: 'notif-join-' + Date.now(),
@@ -842,8 +810,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
                 created_at: new Date().toISOString(),
               });
             }
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedUser = payload.new as UserProfile;
+          } else if (payload.type === 'UPDATE' && payload.record) {
+            const updatedUser = payload.record as UserProfile;
             if (updatedUser.status === 'active' && currentRole === 'resident') {
               localPendingResidentRef.current = null;
               lastApprovedResidentRef.current = updatedUser;
@@ -875,15 +843,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               });
             }
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'payments' },
-        (payload) => {
+        },
+      },
+      {
+        table: 'payments',
+        onChange: (payload) => {
           loadDataFromSupabase();
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const p = payload.new as any;
+          if (payload.type === 'INSERT' && payload.record) {
+            const p = payload.record as any;
             if (p.status === 'pending' && currentRole === 'admin') {
               setActiveBannerNotification({
                 id: 'notif-pay-' + Date.now(),
@@ -900,22 +867,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               });
             }
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'apartments' },
-        () => {
+        },
+      },
+      {
+        table: 'apartments',
+        onChange: () => {
           loadDataFromSupabase();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'apartment_obligations' },
-        (payload) => {
+        },
+      },
+      {
+        table: 'apartment_obligations',
+        onChange: (payload) => {
           loadDataFromSupabase();
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newObl = payload.new as any;
+          if (payload.type === 'INSERT' && payload.record) {
+            const newObl = payload.record as any;
             const myAptId = usersByRole.resident.apartment_id;
             const myAptNum = usersByRole.resident.apartment_number;
             const isForMyApt =
@@ -939,37 +904,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               });
             }
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'building_issues' },
-        () => {
+        },
+      },
+      {
+        table: 'building_issues',
+        onChange: () => {
           loadDataFromSupabase();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'issue_upvotes' },
-        () => {
+        },
+      },
+      {
+        table: 'issue_upvotes',
+        onChange: () => {
           loadDataFromSupabase();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'polls' },
-        () => {
+        },
+      },
+      {
+        table: 'polls',
+        onChange: () => {
           loadDataFromSupabase();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'poll_votes' },
-        () => {
+        },
+      },
+      {
+        table: 'poll_votes',
+        onChange: () => {
           loadDataFromSupabase();
-        }
-      )
-      .subscribe();
+        },
+      },
+    ]);
 
     // 3-second live auto-polling interval so new join requests and payments appear automatically without manual refresh
     const pollInterval = setInterval(() => {
@@ -977,7 +938,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 3000);
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribeRealtime();
       clearInterval(pollInterval);
     };
   }, [loadDataFromSupabase, usersByRole.admin.id]);
@@ -1072,10 +1033,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setNotifications((prev) => [newNotif, ...prev]);
 
-      if (isSupabaseConfigured) {
-        supabase
-          .from('notifications')
-          .insert({
+      if (isRemoteBackendEnabled) {
+        repositories.notifications.insert({
             building_id:
               params.buildingId ?? currentUser.building_id ?? 'bld-amal-001',
             recipient_id: params.recipientId || null,
@@ -1084,8 +1043,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             body: params.body,
             category: params.category,
             metadata: params.metadata || {},
-          })
-          .then(({ error }) => {
+          }).then(({ error }) => {
             if (error) {
               console.warn('Failed to persist notification to Supabase:', error.message);
             }

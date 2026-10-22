@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import type { Expense } from '@/shared/types/database';
-import { expensesApi } from '../infrastructure/expenses.api';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -36,9 +36,9 @@ export function useExpenseActions({
         );
       }
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await expensesApi.recordBuildingExpense(input);
+          await repositories.expenses.recordBuildingExpense(input);
         } catch {
           // Graceful fallback
         }

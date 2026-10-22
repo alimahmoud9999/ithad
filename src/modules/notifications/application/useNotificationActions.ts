@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
-import { notificationsApi } from '../infrastructure/notifications.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -20,9 +20,9 @@ export function useNotificationActions({
   }, []);
 
   const markAllNotificationsAsRead = useCallback(async () => {
-    if (isSupabaseConfigured) {
+    if (isRemoteBackendEnabled) {
       try {
-        await notificationsApi.markAllNotificationsRead();
+        await repositories.notifications.markAllNotificationsRead();
       } catch {
         // Ignore if offline
       }

@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
 import type { Apartment, ApartmentObligation } from '@/shared/types/database';
-import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -111,11 +112,9 @@ export function useUnitActions({
       const isValidUuid = (val: string) =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
-      if (isSupabaseConfigured && currentBuilding.id) {
+      if (isRemoteBackendEnabled && currentBuilding.id) {
         try {
-          const { data: dbApt, error: insertErr } = await supabase
-            .from('apartments')
-            .insert({
+          const { data: dbApt, error: insertErr } = await repositories.units.insertApartment({
               building_id: currentBuilding.id,
               apartment_number: input.apartmentNumber.trim(),
               floor_number: input.floorNumber.trim(),
@@ -127,9 +126,7 @@ export function useUnitActions({
               arrears_amount: initialArrears,
               invite_code: newUnit.invite_code,
               is_active: true,
-            })
-            .select()
-            .maybeSingle();
+            });
 
           if (insertErr) {
             setApartments((prev) => prev.filter((a) => a.id !== newUnitId));
@@ -167,9 +164,9 @@ export function useUnitActions({
           };
           setApartmentObligations((prev) => [newObl, ...prev]);
 
-          if (isSupabaseConfigured && currentBuilding.id && isValidUuid(createdDbId)) {
+          if (isRemoteBackendEnabled && currentBuilding.id && isValidUuid(createdDbId)) {
             try {
-              const { data: dbObl } = await supabase.from('apartment_obligations').insert({
+              const { data: dbObl } = await repositories.units.insertObligationReturningId({
                 building_id: currentBuilding.id,
                 apartment_id: createdDbId,
                 title: newObl.title,
@@ -179,7 +176,7 @@ export function useUnitActions({
                 status: 'unpaid',
                 notes: newObl.notes,
                 created_by: usersByRole.admin.id && isValidUuid(usersByRole.admin.id) ? usersByRole.admin.id : null,
-              }).select('id').maybeSingle();
+              });
 
               if (dbObl?.id) {
                 setApartmentObligations((prev) =>
@@ -209,9 +206,9 @@ export function useUnitActions({
         };
         setApartmentObligations((prev) => [initObligation, ...prev]);
 
-        if (isSupabaseConfigured && currentBuilding.id) {
+        if (isRemoteBackendEnabled && currentBuilding.id) {
           try {
-            await supabase.from('apartment_obligations').insert({
+            await repositories.units.insertObligation({
               building_id: currentBuilding.id,
               apartment_id: createdDbId,
               title: initObligation.title,
@@ -285,7 +282,7 @@ export function useUnitActions({
         })
       );
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
           const updatePayload: Record<string, any> = {};
           if (updates.apartmentNumber !== undefined) updatePayload.apartment_number = updates.apartmentNumber.trim();
@@ -300,10 +297,7 @@ export function useUnitActions({
           }
 
           if (Object.keys(updatePayload).length > 0) {
-            await supabase
-              .from('apartments')
-              .update(updatePayload)
-              .eq('id', apartmentId);
+            await repositories.units.updateApartment(apartmentId, updatePayload);
           }
         } catch (err) {
           console.warn('Supabase updateApartmentUnit error:', err);
@@ -319,9 +313,9 @@ export function useUnitActions({
       prev.filter((o) => o.apartment_id !== apartmentId)
     );
 
-    if (isSupabaseConfigured) {
+    if (isRemoteBackendEnabled) {
       try {
-        await supabase.from('apartments').delete().eq('id', apartmentId);
+        await repositories.units.deleteApartment(apartmentId);
       } catch (err) {
         console.warn('Supabase deleteApartmentUnit error:', err);
       }

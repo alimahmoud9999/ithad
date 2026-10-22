@@ -1,8 +1,10 @@
-import { supabase } from '@/shared/lib/supabase';
+import { supabase, toResult } from '@/data/supabase/client';
+import type { Payment } from '@/shared/types/database';
+import type { PaymentsRepository } from '../domain/payments.repository';
 import type { CashRecipientType, PaymentCategoryType, PaymentMethodType } from '@/shared/types/database';
 
 // Server identity always comes from auth.uid(); never pass user ids as params.
-export const paymentsApi = {
+export const supabasePaymentsRepository: PaymentsRepository = {
   /**
    * Resident submits a monthly dues or emergency claim payment (electronic_transfer or cash)
    * The caller is identified strictly via auth.uid() on the server.
@@ -33,7 +35,7 @@ export const paymentsApi = {
     if (res.error) {
       throw new Error(res.error.message);
     }
-    return res;
+    return toResult(res);
   },
 
   /**
@@ -47,7 +49,7 @@ export const paymentsApi = {
     if (res.error) {
       throw new Error(res.error.message);
     }
-    return res;
+    return toResult(res);
   },
 
   /**
@@ -63,7 +65,7 @@ export const paymentsApi = {
     if (res.error) {
       throw new Error(res.error.message);
     }
-    return res;
+    return toResult(res);
   },
 
   /**
@@ -71,9 +73,25 @@ export const paymentsApi = {
    * and returns their push tokens for immediate Expo Push delivery.
    */
   async sendBulkUnpaidReminder(billingMonth: string, customMessage?: string) {
-    return supabase.rpc('send_bulk_unpaid_reminder', {
+    return toResult(await supabase.rpc('send_bulk_unpaid_reminder', {
       p_billing_month: billingMonth,
       p_custom_message: customMessage ?? null,
-    });
+    }));
+  },
+
+  async list() {
+    return toResult<Payment[]>(await supabase.from('payments').select('*').order('created_at', { ascending: false }));
+  },
+
+  async insert(row) {
+    return toResult<null>(await supabase.from('payments').insert(row));
+  },
+
+  async insertReturningId(row) {
+    return toResult<{ id: string }>(await supabase.from('payments').insert(row).select('id').maybeSingle());
+  },
+
+  async update(id, patch) {
+    return toResult<null>(await supabase.from('payments').update(patch).eq('id', id));
   },
 };

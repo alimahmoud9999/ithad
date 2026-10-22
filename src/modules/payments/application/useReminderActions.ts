@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
-import { paymentsApi } from '../infrastructure/payments.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -21,9 +21,9 @@ export function useReminderActions({
   const sendBulkUnpaidReminder = useCallback(
     async (customMessage?: string) => {
       const currentMonth = new Date().toISOString().slice(0, 7);
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await paymentsApi.sendBulkUnpaidReminder(currentMonth, customMessage);
+          await repositories.payments.sendBulkUnpaidReminder(currentMonth, customMessage);
         } catch {
           // Fallback to local state dispatch
         }

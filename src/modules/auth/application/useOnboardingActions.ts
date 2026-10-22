@@ -1,10 +1,9 @@
 import { useCallback } from 'react';
 import type { Apartment, Building, UserProfile } from '@/shared/types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authSignIn, authSignUp } from '../infrastructure/auth.api';
-import { ensureSupabaseSession, isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
-import { onboardingApi } from '../infrastructure/onboarding.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -75,21 +74,21 @@ export function useOnboardingActions({
     }) => {
       let rpcBuildingCode: string | null = null;
       let rpcBuildingId: string | null = null;
-      if (isSupabaseConfigured) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const currentSessionEmail = sessionData?.session?.user?.email?.trim().toLowerCase();
+      if (isRemoteBackendEnabled) {
+        const sessionUser = await repositories.auth.getSessionUser();
+        const currentSessionEmail = sessionUser?.email?.trim().toLowerCase();
         const targetEmail = input.email?.trim().toLowerCase();
 
         // If target email is provided and differs from active session or if previous session is stale, sign out
         if (targetEmail && input.password) {
           if (currentSessionEmail && currentSessionEmail !== targetEmail) {
-            await supabase.auth.signOut();
+            await repositories.auth.signOut();
           }
 
-          const hasSession = await ensureSupabaseSession();
+          const hasSession = await repositories.auth.ensureSession();
           if (!hasSession) {
             try {
-              await authSignUp(targetEmail, input.password, {
+              await repositories.auth.signUp(targetEmail, input.password, {
                 fullName: input.fullName,
                 phone: input.phone,
                 role: 'admin',
@@ -100,7 +99,7 @@ export function useOnboardingActions({
                 signUpErr?.message?.includes('مسجل بالفعل')
               ) {
                 try {
-                  await authSignIn(targetEmail, input.password);
+                  await repositories.auth.signIn(targetEmail, input.password);
                 } catch {}
               } else {
                 throw signUpErr;
@@ -108,7 +107,7 @@ export function useOnboardingActions({
             }
           }
         }
-        const { data, error } = await onboardingApi.createBuildingForAdmin(input);
+        const { data, error } = await repositories.onboarding.createBuildingForAdmin(input);
         if (error) {
           throw new Error(error.message);
         }
@@ -246,21 +245,21 @@ export function useOnboardingActions({
       let rpcBuildingId: string | null = null;
       let rpcBuildingName: string | null = null;
 
-      if (isSupabaseConfigured) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const currentSessionEmail = sessionData?.session?.user?.email?.trim().toLowerCase();
+      if (isRemoteBackendEnabled) {
+        const sessionUser = await repositories.auth.getSessionUser();
+        const currentSessionEmail = sessionUser?.email?.trim().toLowerCase();
         const targetEmail = input.email?.trim().toLowerCase();
 
         // If target email is provided and differs from active session (e.g. admin logged in on this device), sign out previous user
         if (targetEmail && input.password) {
           if (currentSessionEmail && currentSessionEmail !== targetEmail) {
-            await supabase.auth.signOut();
+            await repositories.auth.signOut();
           }
 
-          const hasSession = await ensureSupabaseSession();
+          const hasSession = await repositories.auth.ensureSession();
           if (!hasSession) {
             try {
-              await authSignUp(targetEmail, input.password, {
+              await repositories.auth.signUp(targetEmail, input.password, {
                 fullName: input.fullName,
                 phone: input.phone,
                 role: 'resident',
@@ -271,7 +270,7 @@ export function useOnboardingActions({
                 signUpErr?.message?.includes('مسجل بالفعل')
               ) {
                 try {
-                  await authSignIn(targetEmail, input.password);
+                  await repositories.auth.signIn(targetEmail, input.password);
                 } catch {}
               } else {
                 throw signUpErr;
@@ -280,7 +279,7 @@ export function useOnboardingActions({
           }
         }
 
-        const { data: rpcJoinData, error } = await onboardingApi.requestJoinBuilding({
+        const { data: rpcJoinData, error } = await repositories.onboarding.requestJoinBuilding({
           ...input,
           buildingCode: cleanCode,
           apartmentNumber: targetAptNumber,
@@ -307,13 +306,9 @@ export function useOnboardingActions({
       );
 
       // If not yet present in local memory, check Supabase directly or fallback
-      if (!targetBuilding && isSupabaseConfigured) {
+      if (!targetBuilding && isRemoteBackendEnabled) {
         try {
-          const { data } = await supabase
-            .from('buildings')
-            .select('*')
-            .or(`building_code.ilike.${cleanCode}${rpcBuildingId ? `,id.eq.${rpcBuildingId}` : ''}`)
-            .maybeSingle();
+          const { data } = await repositories.onboarding.findBuildingByCodeOrId(cleanCode, rpcBuildingId);
           if (data) {
             targetBuilding = data as Building;
             setBuildings((prev) => [data as Building, ...prev]);

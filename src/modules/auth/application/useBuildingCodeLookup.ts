@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { Building, Apartment } from '@/shared/types/database';
 import { useAppStore } from '@/store/AppContext';
 import { parseInviteCode } from '../domain/inviteCode';
-import { onboardingApi } from '../infrastructure/onboarding.api';
+import { repositories } from '@/data/repositories';
 
 export function useBuildingCodeLookup({ buildingCode, setApartmentNumber, setIsInviteCodeAutoMatched, setShowAllApartments, setFloorNumber, setFullName, setPhone, setMatchedAptDetail, showAllApartments, apartmentNumber }: {
   buildingCode: string;
@@ -73,12 +73,12 @@ export function useBuildingCodeLookup({ buildingCode, setApartmentNumber, setIsI
       const code = parsedCodeInfo.buildingPrefix || raw;
       const explicitAptNum = parsedCodeInfo.apartmentNum;
 
-      if (code.length >= 4 && isSupabaseConfigured) {
+      if (code.length >= 4 && isRemoteBackendEnabled) {
         try {
-          let { data: rpcData } = await onboardingApi.lookupBuildingApartmentsForJoin(code);
+          let { data: rpcData } = await repositories.onboarding.lookupBuildingApartmentsForJoin(code);
 
           if (!rpcData?.building_id && raw !== code) {
-            const fallbackRpc = await onboardingApi.lookupBuildingApartmentsForJoin(raw);
+            const fallbackRpc = await repositories.onboarding.lookupBuildingApartmentsForJoin(raw);
             if (fallbackRpc.data?.building_id) {
               rpcData = fallbackRpc.data;
             }
@@ -114,7 +114,7 @@ export function useBuildingCodeLookup({ buildingCode, setApartmentNumber, setIsI
               created_at: new Date().toISOString(),
             };
 
-            const { data: fullBld } = await onboardingApi.findBuildingByCode(code);
+            const { data: fullBld } = await repositories.onboarding.findBuildingByCode(code);
 
             if (isMounted) {
               setRemoteBuilding(fullBld ? (fullBld as Building) : mappedBuilding);
@@ -190,11 +190,11 @@ export function useBuildingCodeLookup({ buildingCode, setApartmentNumber, setIsI
           }
 
           // Fallback direct table query
-          const { data } = await onboardingApi.findBuildingByCode(code);
+          const { data } = await repositories.onboarding.findBuildingByCode(code);
 
           if (isMounted && data) {
             setRemoteBuilding(data as Building);
-            const { data: aptsData } = await onboardingApi.listBuildingApartments(data.id);
+            const { data: aptsData } = await repositories.onboarding.listBuildingApartments(data.id);
             if (isMounted && aptsData) {
               setRemoteApts(aptsData as Apartment[]);
             }

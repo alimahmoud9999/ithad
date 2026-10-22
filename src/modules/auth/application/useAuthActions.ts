@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import type { UserRole } from '@/shared/types/database';
-import { authSignIn, authSignOut, authSignUp } from '../infrastructure/auth.api';
-import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -67,21 +67,17 @@ export function useAuthActions({
 
   const login = useCallback(
     async (email: string, password: string) => {
-      if (!isSupabaseConfigured) {
+      if (!isRemoteBackendEnabled) {
         setAuthenticated(true);
         return;
       }
-      const data = await authSignIn(email, password);
+      const data = await repositories.auth.signIn(email, password);
       const userId = data?.user?.id;
       if (!userId) {
         throw new Error('فشل تسجيل الدخول.');
       }
 
-      const { data: dbUser, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      const { data: dbUser, error } = await repositories.auth.getUserProfile(userId);
 
       if (error) {
         throw new Error(error.message);
@@ -105,18 +101,18 @@ export function useAuthActions({
       password: string,
       metadata?: { fullName?: string; phone?: string; role?: 'admin' | 'resident' }
     ) => {
-      if (!isSupabaseConfigured) {
+      if (!isRemoteBackendEnabled) {
         setAuthenticated(true);
         return;
       }
-      await authSignUp(email, password, metadata);
+      await repositories.auth.signUp(email, password, metadata);
     },
     []
   );
 
   const logout = useCallback(async () => {
-    if (isSupabaseConfigured) {
-      await authSignOut();
+    if (isRemoteBackendEnabled) {
+      await repositories.auth.signOut();
     }
     setAuthenticated(false);
   }, []);

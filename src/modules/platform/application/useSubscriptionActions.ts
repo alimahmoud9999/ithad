@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import type { AppSubscriptionInvoice, BuildingSubscriptionStatus, Expense, FeaturesConfig, PlanTier, SubscriptionPlan } from '@/shared/types/database';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
-import { platformApi } from '../infrastructure/platform.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -42,9 +42,9 @@ export function useSubscriptionActions({
       receiptImageUrl: string;
       notes?: string;
     }) => {
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await platformApi.submitAppSubscriptionInvoice(input);
+          await repositories.platform.submitAppSubscriptionInvoice(input);
         } catch {
           // Graceful fallback
         }
@@ -107,9 +107,9 @@ export function useSubscriptionActions({
       setProcessingIds((prev) => ({ ...prev, [invoiceId]: true }));
 
       try {
-        if (isSupabaseConfigured) {
+        if (isRemoteBackendEnabled) {
           try {
-            await platformApi.activateBuildingSubscription(invoiceId);
+            await repositories.platform.activateBuildingSubscription(invoiceId);
           } catch {
             // Graceful fallback
           }
@@ -209,9 +209,9 @@ export function useSubscriptionActions({
         throw new Error('Unauthorized: Super Admin role required.');
       }
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await platformApi.superAdminConfigureBuilding(input);
+          await repositories.platform.superAdminConfigureBuilding(input);
         } catch {
           // Graceful fallback
         }

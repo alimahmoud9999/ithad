@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { UserProfile } from '@/shared/types/database';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
-import { unitsApi } from '../infrastructure/units.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore, ReviewedResidentEntry } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -171,9 +171,9 @@ export function useJoinRequestActions({
           resident: updatedResidentProfile,
         }));
 
-        if (isSupabaseConfigured) {
+        if (isRemoteBackendEnabled) {
           try {
-            await unitsApi.reviewResidentJoinRequest(
+            await repositories.units.reviewResidentJoinRequest(
               residentId,
               approve,
               targetAptObj?.id ?? null,

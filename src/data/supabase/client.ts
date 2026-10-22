@@ -1,4 +1,5 @@
 import 'react-native-url-polyfill/auto';
+import type { RepoResult } from '../result';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
@@ -40,4 +41,9 @@ export async function ensureSupabaseSession(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Converts a Supabase `{ data, error }` response into the backend-neutral RepoResult. */
+export function toResult<T>(res: { data: unknown; error: { message: string } | null }): RepoResult<T> {
+  return { data: (res.data ?? null) as T | null, error: res.error ? { message: res.error.message } : null };
 }

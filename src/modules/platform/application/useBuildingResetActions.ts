@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
-import { platformApi } from '../infrastructure/platform.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -51,8 +51,8 @@ export function useBuildingResetActions({
       }
       const buildingId = currentBuilding.id;
 
-      if (isSupabaseConfigured) {
-        const { data, error } = await platformApi.resetBuildingData(buildingId, mode);
+      if (isRemoteBackendEnabled) {
+        const { data, error } = await repositories.platform.resetBuildingData(buildingId, mode);
         if (error) {
           throw new Error(error.message || 'فشلت عملية إعادة تهيئة البيانات');
         }

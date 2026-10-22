@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
 import type { CashRecipientType, Payment, PaymentCategoryType, PaymentMethodType } from '@/shared/types/database';
-import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
-import { paymentsApi } from '../infrastructure/payments.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import { isUuid } from '@/shared/utils/uuid';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -139,9 +139,9 @@ export function usePaymentActions({
 
       // 3. Supabase RPC Submission with Fallback
       let serverPaymentId: string | null = null;
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          const rpcRes = await paymentsApi.submitResidentPayment({
+          const rpcRes = await repositories.payments.submitResidentPayment({
             amount: input.amount,
             paymentMethod: input.paymentMethod,
             billingMonth: normalizedMonth,
@@ -164,9 +164,7 @@ export function usePaymentActions({
             input.obligationId
           ) {
             try {
-              const { data: directPay, error: directErr } = await supabase
-                .from('payments')
-                .insert({
+              const { data: directPay, error: directErr } = await repositories.payments.insertReturningId({
                   building_id: currentBuilding.id,
                   apartment_id: resident.apartment_id,
                   apartment_number: effectiveResidentApt,
@@ -181,9 +179,7 @@ export function usePaymentActions({
                   reference_number: input.referenceNumber || '#IP-' + Math.floor(10000 + Math.random() * 90000),
                   notes: input.notes,
                   status: 'pending',
-                })
-                .select('id')
-                .maybeSingle();
+                });
 
               if (directPay?.id) {
                 serverPaymentId = directPay.id;
@@ -235,12 +231,8 @@ export function usePaymentActions({
             o.id === input.obligationId ? { ...o, status: 'pending' as const } : o
           )
         );
-        if (isSupabaseConfigured && isUuid(input.obligationId)) {
-          supabase
-            .from('apartment_obligations')
-            .update({ status: 'pending' })
-            .eq('id', input.obligationId)
-            .then(() => {});
+        if (isRemoteBackendEnabled && isUuid(input.obligationId)) {
+          repositories.units.updateObligation(input.obligationId, { status: 'pending' }).then(() => {});
         }
       }
 
@@ -336,29 +328,21 @@ export function usePaymentActions({
         const isUuid = (val?: string | null) =>
           Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
-        if (isSupabaseConfigured && isUuid(paymentId)) {
+        if (isRemoteBackendEnabled && isUuid(paymentId)) {
           try {
-            await paymentsApi.approveResidentPayment(paymentId);
+            await repositories.payments.approveResidentPayment(paymentId);
           } catch (rpcErr: any) {
             console.warn('approveResidentPayment RPC warning:', rpcErr);
             // If the RPC threw because of column mismatch (e.g. payment_status on apartments), fallback to direct updates
             if (rpcErr?.message?.includes('payment_status') || rpcErr?.message?.includes('column')) {
               try {
-                await supabase
-                  .from('payments')
-                  .update({
+                await repositories.payments.update(paymentId, {
                     status: 'paid',
                     reviewed_by: usersByRole.admin.id,
                     reviewed_at: new Date().toISOString(),
-                  })
-                  .eq('id', paymentId);
+                  });
 
-                await supabase
-                  .from('buildings')
-                  .update({
-                    fund_balance: currentBuilding.fund_balance + targetPayment.amount,
-                  })
-                  .eq('id', targetPayment.building_id);
+                await repositories.platform.setFundBalance(targetPayment.building_id, currentBuilding.fund_balance + targetPayment.amount);
               } catch (fallbackErr) {
                 console.warn('Fallback direct approve error:', fallbackErr);
               }
@@ -504,23 +488,15 @@ export function usePaymentActions({
               setApartmentObligations(updatedObligations);
 
               // Update in Supabase
-              if (isSupabaseConfigured) {
+              if (isRemoteBackendEnabled) {
                 for (const oblId of fullyPaidObligationIds) {
                   if (isUuid(oblId)) {
-                    supabase
-                      .from('apartment_obligations')
-                      .update({ status: 'paid' })
-                      .eq('id', oblId)
-                      .then(() => {});
+                    repositories.units.updateObligation(oblId, { status: 'paid' }).then(() => {});
                   }
                 }
                 for (const partial of partiallyUpdatedObligations) {
                   if (isUuid(partial.id)) {
-                    supabase
-                      .from('apartment_obligations')
-                      .update({ amount: partial.newAmount, notes: partial.notes, status: 'unpaid' })
-                      .eq('id', partial.id)
-                      .then(() => {});
+                    repositories.units.updateObligation(partial.id, { amount: partial.newAmount, notes: partial.notes, status: 'unpaid' }).then(() => {});
                   }
                 }
               }
@@ -564,12 +540,8 @@ export function usePaymentActions({
             );
 
             // Update apartment arrears in Supabase
-            if (isSupabaseConfigured && isUuid(aptTarget.id)) {
-              supabase
-                .from('apartments')
-                .update({ arrears_amount: finalArrears })
-                .eq('id', aptTarget.id)
-                .then(() => {});
+            if (isRemoteBackendEnabled && isUuid(aptTarget.id)) {
+              repositories.units.updateApartment(aptTarget.id, { arrears_amount: finalArrears }).then(() => {});
             }
           } else {
             setApartments((prev) =>
@@ -677,9 +649,9 @@ export function usePaymentActions({
             paymentId
           );
 
-        if (isSupabaseConfigured && isValidUuid) {
+        if (isRemoteBackendEnabled && isValidUuid) {
           try {
-            await paymentsApi.rejectResidentPayment(paymentId, finalReason);
+            await repositories.payments.rejectResidentPayment(paymentId, finalReason);
           } catch (rpcErr) {
             console.warn('rejectResidentPayment RPC warning:', rpcErr);
             throw rpcErr;
@@ -729,12 +701,8 @@ export function usePaymentActions({
           setApartmentObligations((prev) =>
             prev.map((o) => (o.id === matchOblId ? { ...o, status: 'unpaid' as const } : o))
           );
-          if (isSupabaseConfigured && isUuid(matchOblId)) {
-            supabase
-              .from('apartment_obligations')
-              .update({ status: 'unpaid' })
-              .eq('id', matchOblId)
-              .then(() => {});
+          if (isRemoteBackendEnabled && isUuid(matchOblId)) {
+            repositories.units.updateObligation(matchOblId, { status: 'unpaid' }).then(() => {});
           }
         }
 
@@ -830,9 +798,9 @@ export function usePaymentActions({
         created_at: new Date().toISOString(),
       };
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await supabase.from('payments').insert({
+          await repositories.payments.insert({
             building_id: currentBuilding.id,
             apartment_id: input.apartmentId,
             resident_id: input.residentId || null,

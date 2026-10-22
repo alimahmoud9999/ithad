@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import type { ApartmentObligation, PaymentCategoryType } from '@/shared/types/database';
-import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
-import { unitsApi } from '../infrastructure/units.api';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -55,9 +55,9 @@ export function useObligationActions({
         throw new Error('إحدى الشقتين غير موجودة في سجلات المبنى.');
       }
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await unitsApi.transferApartmentObligations({
+          await repositories.units.transferApartmentObligations({
             sourceApartmentId: input.sourceApartmentId,
             targetApartmentId: input.targetApartmentId,
             obligationIds: input.obligationIds ?? null,
@@ -213,21 +213,20 @@ export function useObligationActions({
           a.apartment_number === input.apartmentId
       );
 
-      if (!targetApt && isSupabaseConfigured && currentBuilding.id) {
+      if (!targetApt && isRemoteBackendEnabled && currentBuilding.id) {
         try {
           const isValidUuid = (val: string) =>
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
-          let query = supabase.from('apartments').select('*').eq('building_id', currentBuilding.id);
-          if (isValidUuid(input.apartmentId)) {
-            query = query.eq('id', input.apartmentId);
-          } else if (input.apartmentNumber) {
-            query = query.eq('apartment_number', input.apartmentNumber.trim());
-          } else if (!input.apartmentId.startsWith('apt-')) {
-            query = query.eq('apartment_number', input.apartmentId.trim());
-          }
-          const { data: dbApts } = await query.order('created_at', { ascending: false }).limit(1);
-          const dbApt = dbApts && dbApts.length > 0 ? dbApts[0] : null;
+          const match = isValidUuid(input.apartmentId)
+            ? { id: input.apartmentId }
+            : input.apartmentNumber
+              ? { apartmentNumber: input.apartmentNumber.trim() }
+              : !input.apartmentId.startsWith('apt-')
+                ? { apartmentNumber: input.apartmentId.trim() }
+                : {};
+          const { data: dbApts } = await repositories.units.findLatestApartment(currentBuilding.id, match);
+          const dbApt: any = dbApts && dbApts.length > 0 ? dbApts[0] : null;
           if (dbApt) {
             targetApt = {
               id: dbApt.id,
@@ -289,28 +288,21 @@ export function useObligationActions({
         )
       );
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
           const isValidUuid = (val: string) =>
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
           let targetDbApartmentId = targetApt.id;
           if (!isValidUuid(targetDbApartmentId)) {
-            const { data: foundApt } = await supabase
-              .from('apartments')
-              .select('id')
-              .eq('building_id', currentBuilding.id)
-              .eq('apartment_number', targetApt.apartment_number)
-              .maybeSingle();
+            const { data: foundApt } = await repositories.units.findApartmentId(currentBuilding.id, targetApt.apartment_number);
             if (foundApt?.id) {
               targetDbApartmentId = foundApt.id;
             }
           }
 
           if (isValidUuid(targetDbApartmentId)) {
-            let insertRes = await supabase
-              .from('apartment_obligations')
-              .insert({
+            let insertRes = await repositories.units.insertObligationReturningId({
                 building_id: currentBuilding.id || targetApt.building_id,
                 apartment_id: targetDbApartmentId,
                 title: input.title.trim(),
@@ -320,15 +312,11 @@ export function useObligationActions({
                 status: 'unpaid',
                 notes: input.notes?.trim() || null,
                 created_by: usersByRole.admin.id && isValidUuid(usersByRole.admin.id) ? usersByRole.admin.id : null,
-              })
-              .select('id')
-              .maybeSingle();
+              });
 
             // If 'other' was rejected by postgres because migration 016 was not run yet, retry with 'monthly_dues'
             if (insertRes.error && insertRes.error.message?.toLowerCase().includes('payment_category_type')) {
-              insertRes = await supabase
-                .from('apartment_obligations')
-                .insert({
+              insertRes = await repositories.units.insertObligationReturningId({
                   building_id: currentBuilding.id || targetApt.building_id,
                   apartment_id: targetDbApartmentId,
                   title: input.title.trim(),
@@ -338,9 +326,7 @@ export function useObligationActions({
                   status: 'unpaid',
                   notes: input.notes?.trim() || null,
                   created_by: usersByRole.admin.id && isValidUuid(usersByRole.admin.id) ? usersByRole.admin.id : null,
-                })
-                .select('id')
-                .maybeSingle();
+                });
             }
 
             if (insertRes.data?.id) {
@@ -349,26 +335,18 @@ export function useObligationActions({
               );
             }
 
-            await supabase
-              .from('apartments')
-              .update({
+            await repositories.units.updateApartment(targetDbApartmentId, {
                 payment_status: 'unpaid',
                 arrears_amount: (targetApt.arrears_amount || 0) + input.amount,
-              })
-              .eq('id', targetDbApartmentId);
+              });
 
             // Send instant notification to the resident of this apartment
             try {
-              const { data: resUsers } = await supabase
-                .from('users')
-                .select('id')
-                .eq('building_id', currentBuilding.id || targetApt.building_id)
-                .eq('apartment_number', targetApt.apartment_number)
-                .limit(1);
+              const { data: resUsers } = await repositories.units.findResidentIdsByApartment(currentBuilding.id || targetApt.building_id, targetApt.apartment_number);
 
               const targetResidentId = resUsers?.[0]?.id || targetApt.resident_id;
 
-              await supabase.from('notifications').insert({
+              await repositories.notifications.insert({
                 building_id: currentBuilding.id || targetApt.building_id,
                 recipient_id: targetResidentId && isValidUuid(targetResidentId) ? targetResidentId : null,
                 recipient_role: 'resident',
@@ -449,29 +427,19 @@ export function useObligationActions({
         );
       }
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
           const isValidUuid = (val: string) =>
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
           if (isValidUuid(obligationId)) {
-            await supabase
-              .from('apartment_obligations')
-              .update({ status: 'paid', updated_at: new Date().toISOString() })
-              .eq('id', obligationId);
+            await repositories.units.updateObligation(obligationId, { status: 'paid', updated_at: new Date().toISOString() });
           }
 
           if (targetApt && isValidUuid(targetApt.id)) {
-            const { data: unpaidSum } = await supabase
-              .from('apartment_obligations')
-              .select('amount')
-              .eq('apartment_id', targetApt.id)
-              .eq('status', 'unpaid');
+            const { data: unpaidSum } = await repositories.units.listUnpaidObligationAmounts(targetApt.id);
             const totalRemaining = (unpaidSum || []).reduce((s, row) => s + (Number(row.amount) || 0), 0);
-            await supabase
-              .from('apartments')
-              .update({ arrears_amount: totalRemaining })
-              .eq('id', targetApt.id);
+            await repositories.units.updateApartment(targetApt.id, { arrears_amount: totalRemaining });
           }
         } catch (e) {
           console.warn('Supabase settleApartmentObligation error:', e);
@@ -525,31 +493,24 @@ export function useObligationActions({
       );
 
       // 3. Remove from Supabase
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
           const isValidUuid = (val: string) =>
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
           if (isValidUuid(obligationId)) {
-            await supabase.from('apartment_obligations').delete().eq('id', obligationId);
+            await repositories.units.deleteObligation(obligationId);
           }
 
           if (isValidUuid(targetObl.apartment_id)) {
-            const { data: dbRemaining } = await supabase
-              .from('apartment_obligations')
-              .select('amount')
-              .eq('apartment_id', targetObl.apartment_id)
-              .eq('status', 'unpaid');
+            const { data: dbRemaining } = await repositories.units.listUnpaidObligationAmounts(targetObl.apartment_id);
             const totalRemaining = (dbRemaining || []).reduce(
               (sum: number, r: any) => sum + (Number(r.amount) || 0),
               0
             );
-            await supabase
-              .from('apartments')
-              .update({
+            await repositories.units.updateApartment(targetObl.apartment_id, {
                 arrears_amount: totalRemaining,
-              })
-              .eq('id', targetObl.apartment_id);
+              });
           }
 
           await loadDataFromSupabase();
@@ -625,7 +586,7 @@ export function useObligationActions({
       );
 
       // 3. Update in Supabase
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
           const isValidUuid = (val: string) =>
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
@@ -639,37 +600,24 @@ export function useObligationActions({
             if (updates.notes !== undefined) updatePayload.notes = updates.notes.trim();
 
             if (Object.keys(updatePayload).length > 0) {
-              const { error: upErr } = await supabase
-                .from('apartment_obligations')
-                .update(updatePayload)
-                .eq('id', obligationId);
+              const { error: upErr } = await repositories.units.updateObligation(obligationId, updatePayload);
 
               if (upErr && upErr.message?.toLowerCase().includes('payment_category_type')) {
                 updatePayload.category = 'monthly_dues';
-                await supabase
-                  .from('apartment_obligations')
-                  .update(updatePayload)
-                  .eq('id', obligationId);
+                await repositories.units.updateObligation(obligationId, updatePayload);
               }
             }
           }
 
           if (isValidUuid(targetObl.apartment_id) && updates.amount !== undefined) {
-            const { data: dbRemaining } = await supabase
-              .from('apartment_obligations')
-              .select('amount')
-              .eq('apartment_id', targetObl.apartment_id)
-              .eq('status', 'unpaid');
+            const { data: dbRemaining } = await repositories.units.listUnpaidObligationAmounts(targetObl.apartment_id);
             const totalRemaining = (dbRemaining || []).reduce(
               (sum: number, r: any) => sum + (Number(r.amount) || 0),
               0
             );
-            await supabase
-              .from('apartments')
-              .update({
+            await repositories.units.updateApartment(targetObl.apartment_id, {
                 arrears_amount: totalRemaining,
-              })
-              .eq('id', targetObl.apartment_id);
+              });
           }
 
           await loadDataFromSupabase();

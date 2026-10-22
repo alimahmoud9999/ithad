@@ -1,7 +1,9 @@
-import { supabase } from '@/shared/lib/supabase';
+import { supabase, toResult } from '@/data/supabase/client';
+import type { BuildingIssue, IssueUpvote, Poll, PollVote } from '@/shared/types/database';
+import type { CommunityRepository } from '../domain/community.repository';
 
 // Server identity always comes from auth.uid(); never pass user ids as params.
-export const communityApi = {
+export const supabaseCommunityRepository: CommunityRepository = {
   /**
    * Community Hub: Create building issue / complaint
    */
@@ -16,7 +18,7 @@ export const communityApi = {
     preferredTime?: string;
     whatsappNotifications?: boolean;
   }) {
-    return (supabase.rpc as any)('create_building_issue', {
+    return toResult(await (supabase.rpc as any)('create_building_issue', {
       p_building_id: params.buildingId,
       p_title: params.title,
       p_description: params.description ?? null,
@@ -26,26 +28,26 @@ export const communityApi = {
       p_is_private: params.isPrivate ?? false,
       p_preferred_time: params.preferredTime ?? 'any',
       p_whatsapp_notifications: params.whatsappNotifications ?? true,
-    });
+    }));
   },
 
   /**
    * Community Hub: Toggle issue upvote (1 vote per apartment unit)
    */
   async toggleIssueUpvote(issueId: string) {
-    return (supabase.rpc as any)('toggle_issue_upvote', {
+    return toResult(await (supabase.rpc as any)('toggle_issue_upvote', {
       p_issue_id: issueId,
-    });
+    }));
   },
 
   /**
    * Community Hub: Update issue status (open, in_progress, resolved)
    */
   async updateIssueStatus(issueId: string, status: string) {
-    return (supabase.rpc as any)('update_issue_status', {
+    return toResult(await (supabase.rpc as any)('update_issue_status', {
       p_issue_id: issueId,
       p_status: status,
-    });
+    }));
   },
 
   /**
@@ -64,7 +66,7 @@ export const communityApi = {
     documentUrl?: string | null;
     isUrgent?: boolean;
   }) {
-    return (supabase.rpc as any)('create_building_poll', {
+    return toResult(await (supabase.rpc as any)('create_building_poll', {
       p_building_id: params.buildingId,
       p_title: params.title,
       p_description: params.description ?? null,
@@ -76,16 +78,67 @@ export const communityApi = {
       p_options: params.options ?? null,
       p_document_url: params.documentUrl ?? null,
       p_is_urgent: params.isUrgent ?? false,
-    });
+    }));
   },
 
   /**
    * Community Hub: Cast poll vote (1 vote per apartment unit)
    */
   async castPollVote(pollId: string, choice: string) {
-    return (supabase.rpc as any)('cast_poll_vote', {
+    return toResult(await (supabase.rpc as any)('cast_poll_vote', {
       p_poll_id: pollId,
       p_choice: choice,
-    });
+    }));
+  },
+
+  async listIssues() {
+    return toResult<BuildingIssue[]>(await supabase.from('building_issues').select('*').order('created_at', { ascending: false }));
+  },
+
+  async listUpvotes() {
+    return toResult<IssueUpvote[]>(await supabase.from('issue_upvotes').select('*'));
+  },
+
+  async listPolls() {
+    return toResult<Poll[]>(await supabase.from('polls').select('*').order('created_at', { ascending: false }));
+  },
+
+  async listVotes() {
+    return toResult<PollVote[]>(await supabase.from('poll_votes').select('*'));
+  },
+
+  async insertIssue(row) {
+    return toResult<null>(await supabase.from('building_issues').insert(row));
+  },
+
+  async updateIssue(id, patch) {
+    return toResult<null>(await supabase.from('building_issues').update(patch).eq('id', id));
+  },
+
+  async findUpvote(issueId, apartmentId, userId) {
+    return toResult<{ id: string }>(
+      await supabase
+        .from('issue_upvotes')
+        .select('id')
+        .eq('issue_id', issueId)
+        .or(`apartment_id.eq.${apartmentId},user_id.eq.${userId}`)
+        .maybeSingle()
+    );
+  },
+
+  async insertUpvote(row) {
+    return toResult<null>(await supabase.from('issue_upvotes').insert(row));
+  },
+
+  async deleteUpvote(id) {
+    return toResult<null>(await supabase.from('issue_upvotes').delete().eq('id', id));
+  },
+
+  async insertPoll(row) {
+    return toResult<null>(await supabase.from('polls').insert(row));
+  },
+
+  async upsertVote(row) {
+    return toResult<null>(await supabase.from('poll_votes').upsert(row, { onConflict: 'poll_id,apartment_id' }));
   },
 };

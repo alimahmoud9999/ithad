@@ -1,6 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
+import { repositories } from '@/data/repositories';
 import { StorageBucketName } from '@/shared/types/database';
 
 export interface CompressedUploadResult {
@@ -131,23 +132,18 @@ export async function compressAndUploadImage(
     : undefined;
 
   // Step 4: Upload to Supabase Storage Bucket if Supabase is configured
-  if (isSupabaseConfigured && fileBuffer) {
+  if (isRemoteBackendEnabled && fileBuffer) {
     try {
-      const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(storagePath, fileBuffer, {
-          contentType: 'image/jpeg',
-          cacheControl: '3600',
-          upsert: false,
-        });
+      const { url, error: uploadError } = await repositories.storage.upload(
+        bucket,
+        storagePath,
+        fileBuffer,
+        'image/jpeg'
+      );
 
       if (!uploadError) {
-        const { data: publicUrlData } = supabase.storage
-          .from(bucket)
-          .getPublicUrl(storagePath);
-
         return {
-          publicUrl: publicUrlData?.publicUrl || manipulated.uri,
+          publicUrl: url || manipulated.uri,
           storagePath,
           localUri: manipulated.uri,
           width: manipulated.width,

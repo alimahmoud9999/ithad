@@ -1,9 +1,8 @@
 import { useCallback } from 'react';
 import type { ClaimDistributionType, EmergencyClaim, Expense } from '@/shared/types/database';
-import { emergencyApi } from '../infrastructure/emergency.api';
-import { expensesApi } from '@/modules/expenses/infrastructure/expenses.api';
-import { isSupabaseConfigured } from '@/shared/lib/supabase';
+import { isRemoteBackendEnabled } from '@/data/backend';
 import type { StoreCore } from '@/store/AppContext.types';
+import { repositories } from '@/data/repositories';
 
 type Deps = Pick<
   StoreCore,
@@ -73,9 +72,9 @@ export function useEmergencyActions({
         Math.round((input.targetAmount / denominator) * 100) / 100;
 
       let serverClaimId: string | null = null;
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          const rpcRes = await emergencyApi.createEmergencyClaim({
+          const rpcRes = await repositories.emergency.createEmergencyClaim({
             title: input.title,
             description: input.description,
             category: input.category,
@@ -167,9 +166,9 @@ export function useEmergencyActions({
           ? input.actualAmount
           : targetClaim.collected_amount || targetClaim.target_amount;
 
-      if (isSupabaseConfigured) {
+      if (isRemoteBackendEnabled) {
         try {
-          await expensesApi.recordBuildingExpense({
+          await repositories.expenses.recordBuildingExpense({
             title: `إغلاق مطالبة طارئة: ${targetClaim.title}`,
             amount: finalAmount,
             category: targetClaim.category || 'صيانة ومصاعد',
