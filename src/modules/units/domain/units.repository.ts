@@ -18,7 +18,8 @@ export interface UnitsRepository {
   }): Promise<RepoResult<any>>;
 
   // ---- apartments
-  listApartments(): Promise<RepoResult<Apartment[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  listApartments(buildingId?: string): Promise<RepoResult<Apartment[]>>;
   /** Newest apartment in a building matching an id or a number (no match given = newest in the building); at most one row. */
   findLatestApartment(buildingId: string, match: { id?: string; apartmentNumber?: string }): Promise<RepoResult<Apartment[]>>;
   findApartmentId(buildingId: string, apartmentNumber: string): Promise<RepoResult<{ id: string }>>;
@@ -28,7 +29,8 @@ export interface UnitsRepository {
   deleteApartment(id: string): Promise<RepoResult<null>>;
 
   // ---- obligations (debts)
-  listObligations(): Promise<RepoResult<ApartmentObligation[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  listObligations(buildingId?: string): Promise<RepoResult<ApartmentObligation[]>>;
   listUnpaidObligationAmounts(apartmentId: string): Promise<RepoResult<{ amount: number }[]>>;
   insertObligation(row: RowPatch): Promise<RepoResult<null>>;
   /** Inserts and returns only the new id. */

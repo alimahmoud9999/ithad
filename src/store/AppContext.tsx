@@ -61,6 +61,26 @@ import { useSubscriptionActions } from '@/modules/platform/application/useSubscr
 import { useBuildingResetActions } from '@/modules/platform/application/useBuildingResetActions';
 import { useCommunityActions } from '@/modules/community/application/useCommunityActions';
 import { repositories } from '@/data/repositories';
+import type { RepoResult } from '@/data/result';
+
+// One list call per table in the live snapshot, keyed by the table name realtime reports.
+const snapshotFetchers = {
+  buildings: () => repositories.platform.listBuildings(),
+  apartments: (buildingId?: string) => repositories.units.listApartments(buildingId),
+  apartment_obligations: (buildingId?: string) => repositories.units.listObligations(buildingId),
+  payments: (buildingId?: string) => repositories.payments.list(buildingId),
+  emergency_claims: (buildingId?: string) => repositories.emergency.listClaims(buildingId),
+  expenses: (buildingId?: string) => repositories.expenses.list(buildingId),
+  notifications: (buildingId?: string) => repositories.notifications.list(buildingId),
+  users: (buildingId?: string) => repositories.auth.listUserProfiles(buildingId),
+  subscription_plans: () => repositories.platform.listPlans(),
+  building_issues: (buildingId?: string) => repositories.community.listIssues(buildingId),
+  issue_upvotes: (buildingId?: string) => repositories.community.listUpvotes(buildingId),
+  polls: (buildingId?: string) => repositories.community.listPolls(buildingId),
+  poll_votes: (buildingId?: string) => repositories.community.listVotes(buildingId),
+};
+type SnapshotTable = keyof typeof snapshotFetchers;
+const SNAPSHOT_TABLES = Object.keys(snapshotFetchers) as SnapshotTable[];
 
 
 
@@ -118,7 +138,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     {}
   );
 
-  // Set/Map of reviewed residents to shield approved residents against 3-second polling overwrite
+  // Set/Map of reviewed residents to shield approved residents against being overwritten by server reloads
   const [reviewedResidentKeys, setReviewedResidentKeys] = useState<
     Record<string, ReviewedResidentEntry>
   >({});
@@ -192,43 +212,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const currentUser = usersByRole[currentRole];
 
-  // Load live data from Supabase tables
-  const loadDataFromSupabase = useCallback(async () => {
+  // Last fetched result per table, so a realtime change refetches only its own table
+  const snapshotRef = useRef<{
+    buildingId?: string;
+    results: Partial<Record<SnapshotTable, RepoResult<any>>>;
+  }>({ results: {} });
+
+  // Load live data from the backend. Stable on purpose: it reads current state through latestRef,
+  // because listing state as deps recreated it on every load and re-ran the effects that call it.
+  // `tables` refetches just those tables; without it (or on a building switch) everything is refetched.
+  const loadDataFromSupabase = useCallback(async (tables?: SnapshotTable[]) => {
     if (!isRemoteBackendEnabled) return;
 
     try {
       // Ensure we are signed into the active building session so RLS never hides claims, expenses, payments, or users
       await repositories.auth.ensureSession();
 
-      const [
-        bRes,
-        aRes,
-        oRes,
-        pRes,
-        cRes,
-        eRes,
-        nRes,
-        uRes,
-        sRes,
-        issuesRes,
-        upvotesRes,
-        pollsRes,
-        votesRes,
-      ] = await Promise.all([
-        repositories.platform.listBuildings(),
-        repositories.units.listApartments(),
-        repositories.units.listObligations(),
-        repositories.payments.list(),
-        repositories.emergency.listClaims(),
-        repositories.expenses.list(),
-        repositories.notifications.list(),
-        repositories.auth.listUserProfiles(),
-        repositories.platform.listPlans(),
-        repositories.community.listIssues(),
-        repositories.community.listUpvotes(),
-        repositories.community.listPolls(),
-        repositories.community.listVotes(),
-      ]);
+      const { payments, apartmentObligations, currentRole, usersByRole, currentBuilding } = latestRef.current;
+      const buildingId =
+        (currentRole !== 'super_admin' && usersByRole[currentRole].building_id) || undefined;
+
+      const snapshot = snapshotRef.current;
+      const toFetch =
+        Array.isArray(tables) && snapshot.buildingId === buildingId && snapshot.results.buildings
+          ? tables
+          : SNAPSHOT_TABLES;
+      const fetched = await Promise.all(toFetch.map((t) => snapshotFetchers[t](buildingId)));
+      toFetch.forEach((t, i) => {
+        snapshot.results[t] = fetched[i];
+      });
+      snapshot.buildingId = buildingId;
+
+      const {
+        buildings: bRes,
+        apartments: aRes,
+        apartment_obligations: oRes,
+        payments: pRes,
+        emergency_claims: cRes,
+        expenses: eRes,
+        notifications: nRes,
+        users: uRes,
+        subscription_plans: sRes,
+        building_issues: issuesRes,
+        issue_upvotes: upvotesRes,
+        polls: pollsRes,
+        poll_votes: votesRes,
+      } = snapshot.results as Record<SnapshotTable, RepoResult<any>>;
 
       const bList = (bRes.data as Building[]) || [];
       if (bList.length > 0) {
@@ -271,7 +300,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         });
       }
       const uList = (uRes.data as UserProfile[]) || [];
-      const primaryBuilding = bList[0];
+      const primaryBuilding = bList.find((b) => b.id === buildingId) || bList[0];
 
       if (uList.length > 0 || localPendingResidentRef.current || lastApprovedResidentRef.current) {
         const reviewedMap = reviewedResidentKeysRef.current || {};
@@ -732,19 +761,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (err) {
       console.warn('loadDataFromSupabase warning:', err);
     }
-  }, [payments, currentRole, usersByRole]);
+  }, []);
 
-  // Sync with Supabase on mount and subscribe to Realtime public schema changes
+  // Full snapshot on mount and whenever the signed-in identity or its building changes
+  const scopeBuildingId = currentRole === 'super_admin' ? '' : currentUser.building_id || '';
+  useEffect(() => {
+    loadDataFromSupabase();
+  }, [loadDataFromSupabase, currentRole, currentUser.id, scopeBuildingId]);
+
+  // Subscribe once to realtime changes; each change refetches only its own table
   useEffect(() => {
     if (!isRemoteBackendEnabled) return;
-
-    loadDataFromSupabase();
 
     const unsubscribeRealtime = repositories.realtime.subscribe([
       {
         table: 'notifications',
         onChange: (payload) => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['notifications']);
+          const { currentRole, usersByRole } = latestRef.current;
           if (payload.type === 'INSERT' && payload.record) {
             const notif = payload.record as AppNotification;
             const notifTitle = notif.title || '';
@@ -775,7 +809,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             } else if (currentRole === 'resident') {
               if (isResidentNotif && !isAdminNotif) {
                 const targetApt = notif.metadata?.apartment_number;
-                const myApt = currentUser.apartment_number || usersByRole.resident.apartment_number;
+                const myApt = usersByRole[currentRole].apartment_number || usersByRole.resident.apartment_number;
                 const isForMyUnit =
                   !targetApt ||
                   !myApt ||
@@ -792,7 +826,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       {
         table: 'users',
         onChange: (payload) => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['users']);
+          const { currentRole, usersByRole } = latestRef.current;
           if (payload.type === 'INSERT' && payload.record) {
             const newUser = payload.record as UserProfile;
             if (newUser.status === 'pending' && currentRole === 'admin') {
@@ -848,7 +883,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       {
         table: 'payments',
         onChange: (payload) => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['payments']);
+          const { currentRole, usersByRole } = latestRef.current;
           if (payload.type === 'INSERT' && payload.record) {
             const p = payload.record as any;
             if (p.status === 'pending' && currentRole === 'admin') {
@@ -872,13 +908,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       {
         table: 'apartments',
         onChange: () => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['apartments']);
         },
       },
       {
         table: 'apartment_obligations',
         onChange: (payload) => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['apartment_obligations']);
+          const { currentRole, usersByRole } = latestRef.current;
           if (payload.type === 'INSERT' && payload.record) {
             const newObl = payload.record as any;
             const myAptId = usersByRole.resident.apartment_id;
@@ -886,7 +923,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             const isForMyApt =
               (myAptId && newObl.apartment_id === myAptId) ||
               (myAptNum && newObl.apartment_number && String(newObl.apartment_number).trim() === String(myAptNum).trim()) ||
-              (apartments.find((a) => a.id === newObl.apartment_id)?.apartment_number === myAptNum);
+              (latestRef.current.apartments.find((a) => a.id === newObl.apartment_id)?.apartment_number === myAptNum);
 
             if (currentRole === 'resident' && isForMyApt) {
               setActiveBannerNotification({
@@ -909,39 +946,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       {
         table: 'building_issues',
         onChange: () => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['building_issues']);
         },
       },
       {
         table: 'issue_upvotes',
         onChange: () => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['issue_upvotes']);
         },
       },
       {
         table: 'polls',
         onChange: () => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['polls']);
         },
       },
       {
         table: 'poll_votes',
         onChange: () => {
-          loadDataFromSupabase();
+          loadDataFromSupabase(['poll_votes']);
         },
       },
     ]);
 
-    // 3-second live auto-polling interval so new join requests and payments appear automatically without manual refresh
-    const pollInterval = setInterval(() => {
-      loadDataFromSupabase();
-    }, 3000);
-
-    return () => {
-      unsubscribeRealtime();
-      clearInterval(pollInterval);
-    };
-  }, [loadDataFromSupabase, usersByRole.admin.id]);
+    return unsubscribeRealtime;
+  }, [loadDataFromSupabase]);
 
   // Register Expo Push Token on app startup & whenever role changes, and store in users table
   useEffect(() => {
@@ -1106,6 +1135,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       DEFAULT_EMPTY_BUILDING
     );
   }, [buildings, currentUser.building_id]);
+
+  // Latest render values for the stable loader and the realtime handlers
+  const latestRef = useRef({ payments, apartmentObligations, apartments, usersByRole, currentRole, currentBuilding });
+  latestRef.current = { payments, apartmentObligations, apartments, usersByRole, currentRole, currentBuilding };
 
   const currentRoleNotifications = useMemo(() => {
     return notifications.filter((n) => {

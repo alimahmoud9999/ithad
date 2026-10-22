@@ -43,8 +43,10 @@ export const supabaseUnitsRepository: UnitsRepository = {
     }));
   },
 
-  async listApartments() {
-    return toResult<Apartment[]>(await supabase.from('apartments').select('*').order('apartment_number', { ascending: true }));
+  async listApartments(buildingId) {
+    let query = supabase.from('apartments').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<Apartment[]>(await query.order('apartment_number', { ascending: true }));
   },
 
   async findLatestApartment(buildingId, match) {
@@ -72,8 +74,10 @@ export const supabaseUnitsRepository: UnitsRepository = {
     return toResult<null>(await supabase.from('apartments').delete().eq('id', id));
   },
 
-  async listObligations() {
-    return toResult<ApartmentObligation[]>(await supabase.from('apartment_obligations').select('*').order('created_at', { ascending: false }));
+  async listObligations(buildingId) {
+    let query = supabase.from('apartment_obligations').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<ApartmentObligation[]>(await query.order('created_at', { ascending: false }));
   },
 
   async listUnpaidObligationAmounts(apartmentId) {

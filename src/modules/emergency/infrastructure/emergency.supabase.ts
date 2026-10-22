@@ -38,7 +38,9 @@ export const supabaseEmergencyRepository: EmergencyRepository = {
     return toResult(res);
   },
 
-  async listClaims() {
-    return toResult<EmergencyClaim[]>(await supabase.from('emergency_claims').select('*').order('created_at', { ascending: false }));
+  async listClaims(buildingId) {
+    let query = supabase.from('emergency_claims').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<EmergencyClaim[]>(await query.order('created_at', { ascending: false }));
   },
 };

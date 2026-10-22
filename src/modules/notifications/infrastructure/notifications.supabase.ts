@@ -20,8 +20,10 @@ export const supabaseNotificationsRepository: NotificationsRepository = {
     return toResult(await (supabase.rpc as any)('mark_all_notifications_read'));
   },
 
-  async list() {
-    return toResult<AppNotification[]>(await supabase.from('notifications').select('*').order('created_at', { ascending: false }));
+  async list(buildingId) {
+    let query = supabase.from('notifications').select('*');
+    if (buildingId) query = query.or(`building_id.eq.${buildingId},building_id.is.null`); // building-less notifications (e.g. platform-wide) stay visible
+    return toResult<AppNotification[]>(await query.order('created_at', { ascending: false }));
   },
 
   async insert(row) {

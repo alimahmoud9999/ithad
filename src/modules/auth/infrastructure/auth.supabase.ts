@@ -70,7 +70,9 @@ export const supabaseAuthRepository: AuthRepository = {
     return toResult<UserProfile>(await supabase.from('users').select('*').eq('id', userId).maybeSingle());
   },
 
-  async listUserProfiles() {
-    return toResult<UserProfile[]>(await supabase.from('users').select('*'));
+  async listUserProfiles(buildingId) {
+    let query = supabase.from('users').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<UserProfile[]>(await query);
   },
 };

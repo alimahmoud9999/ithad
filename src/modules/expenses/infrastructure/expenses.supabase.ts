@@ -29,7 +29,9 @@ export const supabaseExpensesRepository: ExpensesRepository = {
     }));
   },
 
-  async list() {
-    return toResult<Expense[]>(await supabase.from('expenses').select('*').order('created_at', { ascending: false }));
+  async list(buildingId) {
+    let query = supabase.from('expenses').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<Expense[]>(await query.order('created_at', { ascending: false }));
   },
 };

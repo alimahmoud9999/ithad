@@ -12,6 +12,7 @@ export interface NotificationsRepository {
    */
   markAllNotificationsRead(): Promise<RepoResult<any>>;
 
-  list(): Promise<RepoResult<AppNotification[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  list(buildingId?: string): Promise<RepoResult<AppNotification[]>>;
   insert(row: RowPatch): Promise<RepoResult<null>>;
 }

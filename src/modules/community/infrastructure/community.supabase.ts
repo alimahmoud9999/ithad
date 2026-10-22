@@ -91,20 +91,28 @@ export const supabaseCommunityRepository: CommunityRepository = {
     }));
   },
 
-  async listIssues() {
-    return toResult<BuildingIssue[]>(await supabase.from('building_issues').select('*').order('created_at', { ascending: false }));
+  async listIssues(buildingId) {
+    let query = supabase.from('building_issues').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<BuildingIssue[]>(await query.order('created_at', { ascending: false }));
   },
 
-  async listUpvotes() {
-    return toResult<IssueUpvote[]>(await supabase.from('issue_upvotes').select('*'));
+  async listUpvotes(buildingId) {
+    let query = supabase.from('issue_upvotes').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<IssueUpvote[]>(await query);
   },
 
-  async listPolls() {
-    return toResult<Poll[]>(await supabase.from('polls').select('*').order('created_at', { ascending: false }));
+  async listPolls(buildingId) {
+    let query = supabase.from('polls').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<Poll[]>(await query.order('created_at', { ascending: false }));
   },
 
-  async listVotes() {
-    return toResult<PollVote[]>(await supabase.from('poll_votes').select('*'));
+  async listVotes(buildingId) {
+    let query = supabase.from('poll_votes').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<PollVote[]>(await query);
   },
 
   async insertIssue(row) {

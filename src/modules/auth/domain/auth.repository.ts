@@ -23,7 +23,8 @@ export interface AuthRepository {
   /** Verifies the session with the backend; clears a stale/deleted session and returns false. */
   ensureSession(): Promise<boolean>;
   getUserProfile(userId: string): Promise<RepoResult<UserProfile>>;
-  listUserProfiles(): Promise<RepoResult<UserProfile[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  listUserProfiles(buildingId?: string): Promise<RepoResult<UserProfile[]>>;
 }
 
 export interface CreateBuildingParams {

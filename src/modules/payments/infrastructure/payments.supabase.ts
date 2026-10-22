@@ -79,8 +79,10 @@ export const supabasePaymentsRepository: PaymentsRepository = {
     }));
   },
 
-  async list() {
-    return toResult<Payment[]>(await supabase.from('payments').select('*').order('created_at', { ascending: false }));
+  async list(buildingId) {
+    let query = supabase.from('payments').select('*');
+    if (buildingId) query = query.eq('building_id', buildingId);
+    return toResult<Payment[]>(await query.order('created_at', { ascending: false }));
   },
 
   async insert(row) {

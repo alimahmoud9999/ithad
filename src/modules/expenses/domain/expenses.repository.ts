@@ -17,5 +17,6 @@ export interface ExpensesRepository {
     voucherNumber?: string | null;
   }): Promise<RepoResult<any>>;
 
-  list(): Promise<RepoResult<Expense[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  list(buildingId?: string): Promise<RepoResult<Expense[]>>;
 }

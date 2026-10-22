@@ -20,5 +20,6 @@ export interface EmergencyRepository {
     occupiedOnly?: boolean;
   }): Promise<RepoResult<any>>;
 
-  listClaims(): Promise<RepoResult<EmergencyClaim[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  listClaims(buildingId?: string): Promise<RepoResult<EmergencyClaim[]>>;
 }

@@ -46,10 +46,11 @@ export interface CommunityRepository {
    */
   castPollVote(pollId: string, choice: string): Promise<RepoResult<any>>;
 
-  listIssues(): Promise<RepoResult<BuildingIssue[]>>;
-  listUpvotes(): Promise<RepoResult<IssueUpvote[]>>;
-  listPolls(): Promise<RepoResult<Poll[]>>;
-  listVotes(): Promise<RepoResult<PollVote[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  listIssues(buildingId?: string): Promise<RepoResult<BuildingIssue[]>>;
+  listUpvotes(buildingId?: string): Promise<RepoResult<IssueUpvote[]>>;
+  listPolls(buildingId?: string): Promise<RepoResult<Poll[]>>;
+  listVotes(buildingId?: string): Promise<RepoResult<PollVote[]>>;
   insertIssue(row: RowPatch): Promise<RepoResult<null>>;
   updateIssue(id: string, patch: RowPatch): Promise<RepoResult<null>>;
   /** The upvote on an issue by this apartment or this user, if any. */

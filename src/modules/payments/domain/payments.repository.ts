@@ -35,7 +35,8 @@ export interface PaymentsRepository {
    */
   sendBulkUnpaidReminder(billingMonth: string, customMessage?: string): Promise<RepoResult<any>>;
 
-  list(): Promise<RepoResult<Payment[]>>;
+  /** Scoped to one building when `buildingId` is given; everything visible otherwise. */
+  list(buildingId?: string): Promise<RepoResult<Payment[]>>;
   insert(row: RowPatch): Promise<RepoResult<null>>;
   /** Inserts and returns only the new id. */
   insertReturningId(row: RowPatch): Promise<RepoResult<{ id: string }>>;
