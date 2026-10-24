@@ -86,6 +86,23 @@ export const DashboardShell: React.FC<{ children: React.ReactNode }> = ({
   // ==========================================================================
   // Security & Auth Guard Screen (Blocks non-super_admin roles immediately)
   // ==========================================================================
+  if (isLoadingAuth) {
+    return (
+      <div
+        dir="rtl"
+        className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6 space-y-4"
+      >
+        <div className="w-12 h-12 rounded-2xl bg-[#1E293B] text-[#10B981] flex items-center justify-center shadow-lg animate-pulse">
+          <Building2 className="w-7 h-7" />
+        </div>
+        <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+          <div className="w-4 h-4 border-2 border-[#10B981] border-t-transparent rounded-full animate-spin" />
+          <span>جاري التحقق من جلسة وصلاحيات الإدارة العليا (Super Admin)...</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthorizedSuperAdmin) {
     return (
       <div

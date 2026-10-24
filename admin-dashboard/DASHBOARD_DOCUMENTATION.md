@@ -1,7 +1,7 @@
 # 🏢 التوثيق المرجعي الشامل للوحة تحكم الشركة المالكة (Super Admin Next.js Web Dashboard)
 
 > **⚠️ قاعدة الفصل المعماري (Architecture Separation Rule):**
-> هذا المشروع مستقل تماماً داخل مجلد [`admin-dashboard/`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard) ويعمل بإطار **Next.js (App Router) + TypeScript + Tailwind CSS** لخدمة الإدارة العليا والمنصة المالكة (`super_admin`) لتطبيق **"مدير اتحاد الملاك (Ittihad Trust)"**. لا يتداخل هذا المشروع في الحزم أو الكود مع تطبيق الموبايل (`React Native / Expo`) الموجود في الجذر، ولكنه يتصل بنفس قاعدة بيانات **Supabase** ونفس الجداول وسياسات الـ RLS ودوال الـ RPC المؤمنة.
+> هذا المشروع مستقل تماماً داخل مجلد [`admin-dashboard/`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard) ويعمل بإطار **Next.js (App Router) + TypeScript + Tailwind CSS** لخدمة الإدارة العليا والمنصة المالكة (`super_admin`) لتطبيق **"مدير اتحاد الملاك (Ittihad Trust)"**. لا يتداخل هذا المشروع في الحزم أو الكود مع تطبيق الموبايل (`React Native / Expo`) الموجود في الجذر، ولكنه يتصل بنفس قاعدة بيانات **Supabase** ونفس الجداول وسياسات الـ RLS ودوال الـ RPC المؤمنة.
 
 ---
 
@@ -16,28 +16,34 @@
   * **الأصفر التحذيري (`Amber Pending`):** `#F59E0B`
   * **الأحمر التنبيهي (`Danger Red`):** `#EF4444`
   * **خلفية الصفحات (`Background Slate`):** `#F8FAFC`
-* **قاعدة البيانات والربط:** الاتصال المباشر بمشروع **Supabase** (`https://iyqgwswvaxwhzuywbmrn.supabase.co`) عبر `@supabase/supabase-js` في [supabase.ts](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/lib/supabase.ts).
+* **قاعدة البيانات والربط:** الاتصال المباشر بمشروع **Supabase** (`https://iyqgwswvaxwhzuywbmrn.supabase.co`) عبر `@supabase/supabase-js` في [supabase.ts](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/lib/supabase.ts).
 
 ---
 
 ## 🔐 2. الأمان وحماية الصلاحيات (Security & `super_admin` Auth Guard)
 
-1. **حماية المسارات وفحص الصلاحية الصارم (`Role Guard`):**
-   * يتم تسجيل الدخول عبر **Supabase Auth** (`signInWithPassword`) داخل [DashboardShell.tsx](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/components/layout/DashboardShell.tsx) و [DashboardContext.tsx](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/context/DashboardContext.tsx).
-   * فور تسجيل الدخول، تتحقق الدالة [`verifySuperAdminRole`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/lib/supabase.ts#L36-L86) عبر الدالة المؤمنة `public.get_my_role()` وفحص جدول `public.users` بالاعتماد على `auth.uid()` من أن المستخدم يمتلك صلاحية:
-     `role === 'super_admin'` حصرياً.
+1. **حماية المسارات وفحص الصلاحية الصارم (`Role Guard` ومنع البيانات الوهمية):**
+   * يتم تسجيل الدخول حصرياً عبر **Supabase Auth** (`signInWithPassword`) داخل [DashboardShell.tsx](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/components/layout/DashboardShell.tsx) و [DashboardContext.tsx](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/context/DashboardContext.tsx).
+   * **إلغاء الدخول التلقائي والبيانات التجريبية:** تبدأ حالة الداشبورد بـ `isAuthorizedSuperAdmin = false` وتفريغ مصفوفات البيانات من أي سجلات وهمية (`INITIAL_USERS = []`).
+   * يتحقق النظام فوراً عبر دالة [`verifySuperAdminRole`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/lib/supabase.ts) من جلسة Supabase الفعلية بالاعتماد على `public.get_my_role()` وفحص جدول `public.users` بالاعتماد على `auth.uid()`.
+   * إذا لم توجد جلسة سوبر أدمن حقيقية، تُعرض شاشة تسجيل الدخول الرسمية فوراً ولا يتم تحميل البيانات، مما يضمن احترام سياسات الـ RLS وعرض البيانات الحقيقية فقط للمدير العام.
    * أي مستخدم آخر (`admin` أو `resident`) يحاول الدخول للداشبورد يتم منعه فوراً وتسجيل خروجه تلقائياً (`supabase.auth.signOut()`) مع إظهار رسالة الخطأ الصريحة:
      > **"غير مصرح لك بالدخول، هذه اللوحة مخصصة لإدارة المنصة فقط"**
+
 2. **الاعتماد الكامل على دوال الـ RPC الآمنة (`Zero ID Spoofing`):**
    * لا يتم تمرير أي معرفات هوية للمدير من الواجهة، وتعتمد جميع عمليات التفعيل والتخصيص على دوال الـ RPC المحمية بـ `SECURITY DEFINER` و `auth.uid()` في قاعدة البيانات:
-     * [`rpcSuperAdminConfigureBuilding`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/lib/supabase.ts#L93-L115) (`public.super_admin_configure_building`): لتخصيص باقة العمارة، حالتها، السعر الشهري الاستثنائي (`custom_monthly_price`)، الحد الأقصى المخصص للشقق (`max_apartments_override`)، ومفاتيح المميزات المستقلة (`features_config` JSONB).
-     * [`rpcActivateBuildingSubscription`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/lib/supabase.ts#L125-L135) (`public.activate_building_subscription`): لاعتماد أو رفض فواتير تجديد اشتراك التطبيق (`app_subscription_invoices`) مع حماية `Idempotency`، وتمديد صلاحية العمارة، وإدراج مصروف تلقائي في ميزانية العمارة (`expenses`) بعنوان *"رسوم اشتراك تطبيق إدارة العقار"* وخصم قيمته من رصيد الخزينة (`fund_balance`) وإرفاق نفس صورة الإيصال ليظهر للسكان في لوحة الشفافية.
+     * [`rpcSuperAdminConfigureBuilding`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/lib/supabase.ts) (`public.super_admin_configure_building`): لتخصيص باقة العمارة، حالتها، تمديد الاشتراك، السعر الشهري الاستثنائي (`custom_monthly_price`)، الحد الأقصى المخصص للشقق (`max_apartments_override`)، ومفاتيح المميزات المستقلة (`features_config` JSONB).
+     * [`rpcActivateBuildingSubscription`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/lib/supabase.ts) (`public.activate_building_subscription`): لاعتماد أو رفض فواتير تجديد اشتراك التطبيق (`app_subscription_invoices`) مع حماية `Idempotency`، وتمديد صلاحية العمارة، وإدراج مصروف تلقائي في ميزانية العمارة (`expenses`) بعنوان *"رسوم اشتراك تطبيق إدارة العقار"* وخصم قيمته من رصيد الخزينة (`fund_balance`) وإرفاق نفس صورة الإيصال ليظهر للسكان في لوحة الشفافية.
+     * [`rpcResetBuildingData`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/lib/supabase.ts) (`public.reset_building_data`): لتصفير بيانات السكان والعمليات للعمارة أو حذف العمارة بالكامل للاختبار السريع.
+
+3. **معالجة سقف الاستعلامات (Pagination / Limits):**
+   * تم تزويد جميع استعلامات الجداول بـ `.limit(5000)` لتجاوز سقف Supabase الافتراضي (1000 صف) وضمان جلب كافة العمارات والمستخدمين والشقق بدون نقص.
 
 ---
 
 ## 🖥️ 3. شرح صفحات ووحدات الداشبورد المنجزة (Dashboard Modules)
 
-### أ. الصفحة الرئيسية: الإحصائيات العامة ([`src/app/page.tsx`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/app/page.tsx))
+### أ. الصفحة الرئيسية: الإحصائيات العامة ([`src/app/page.tsx`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/app/page.tsx))
 * **4 بطاقات إحصائية (KPI Cards):**
   1. **إجمالي العمارات المسجلة:** مع تفصيل فوري لعدد العمارات النشطة (`active`)، التجريبية (`trial`)، والمنتهية (`expired`).
   2. **إجمالي الشقق والسكان:** سعة الشقق المسجلة على المنصة وإجمالي حسابات السكان ورؤساء الاتحاد.
@@ -45,16 +51,52 @@
   4. **إجمالي إيرادات المنصة:** إجمالي التحصيل الكلي وإيرادات الشهر الحالي من فواتير اشتراكات العمارات المعتمدة.
 * **جدولان سريعان:** آخر 5 فواتير اشتراك مرفوعة للمراجعة، وآخر 5 عمارات مسجلة على المنصة.
 
-### ب. إدارة العمارات والتخصيص المرن ([`src/app/buildings/page.tsx`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/app/buildings/page.tsx))
+### ب. إدارة العمارات والتخصيص المرن ([`src/app/buildings/page.tsx`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/app/buildings/page.tsx))
 * جدول شامل لجميع العمارات مع **بحث فوري** (باسم العمارة، كود العمارة `building_code`، اسم أو هاتف رئيس الاتحاد) وفلترة حسب الحالة (`active`, `trial`, `expired`) أو نوع الباقة (`free`, `pro`, `plus`).
+* **اسم العمارة قابل للنقر:** النقر على اسم العمارة ينقل فوراً إلى صفحة تفاصيل وسجل العمارة المستقلة (`/buildings/[id]`).
+* **زر "سجل العمارة":** زر مخصص في عمود الإجراءات للانتقال المباشر لصفحة سجل الملاك.
 * **نافذة تفاصيل العمارة والتحكم المرن (`Building Control Modal`):**
   ترتبط مباشرة بدالة `super_admin_configure_building` وتتيح:
   1. تغيير الباقة (`free`, `pro`, `plus`) أو الحالة أو تمديد تاريخ انتهاء الاشتراك يدوياً.
   2. تخصيص السعر الشهري (`custom_monthly_price`) كعرض خاص للعمارة أو تركه فارغاً ليتبع السعر العام.
   3. تخصيص الحد الأقصى للشقق (`max_apartments_override`) لفتح عدد شقق إضافي استثنائياً.
-  4. **مفاتيح المميزات المستقلة (`features_config` JSONB Switches):** 6 أزرار Toggle مستقلة لتفعيل/إيقاف كل ميزة على حدة للعمارة (رفع الإيصالات بالصور، المطالبات الطارئة، تصدير التقارير PDF/Excel، التصويت، تذاكر الصيانة، وأرشيف المستندات).
+  4. **مفاتيح المميزات المستقلة (`features_config` JSONB Switches):** 6 أزرار Toggle مستقلة لتفعيل/إيقاف كل ميزة على حدة للعمارة.
+  5. أزرار تصفير السكان أو حذف العمارة بالكامل.
 
-### ج. مركز مراجعة فواتير اشتراك التطبيق والتفعيل الذكي ([`src/app/invoices/page.tsx`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/app/invoices/page.tsx))
+### ج. صفحة تفاصيل العمارة وسجل الملاك المستقلة ([`src/app/buildings/[id]/page.tsx`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/app/buildings/[id]/page.tsx))
+* **كارت ملخص العمارة الرئيسي:**
+  * يعرض اسم العمارة، كود الانضمام الفريد مع زر النسخ السريع، العنوان والمدينة، وتاريخ انتهاء الاشتراك.
+  * مؤشرات بيانية: نسبة إشغال الشقق مع شريط تقدم رسومي، عدد السكان المفعلين والمعلقين، ورصيد الخزينة الحالي.
+  * أزرار تحكم إدارية سريعة: **تمديد الاشتراك 30 يوم إضافية** بضغطة زر، أو **إيقاف العمارة مؤقتاً / إعادة تفعيلها** عبر دالة `super_admin_configure_building`.
+* **القسم الأول: بيانات رئيس اتحاد الملاك (Union Head):**
+  * الاسم الكامل لرئيس الاتحاد، رقم الشقة والطابق.
+  * رقم الهاتف مع **زر اتصال هاتفي مباشر (`tel:`)** و**زر مراسلة واتساب فوري (`https://wa.me/20...`)** وزر نسخ.
+  * البريد الإلكتروني الذي يسجل ويدخل به مع زر مراسلة إيميل وزر نسخ.
+  * شارة تمييز ذهبية لمدير العمارة.
+* **القسم الثاني: سجل الملاك وشاغلي العمارة (Occupants & Owners Roster):**
+  * جدول كامل لجميع الملاك والساكنين المسجلين في هذه العمارة.
+  * **شارة التمييز (Tag):** تمييز لوني دقيق بين **«رئيس اتحاد»** (ذهبي/برتقالي) و**«مالك / ساكن»** (أخضر زمردي/رمادي).
+  * لكل عضو: الاسم الكامل، رقم التليفون وأزرار التواصل، الإيميل المسجل به، رقم الشقة والطابق، حالة الحساب (نشط / معلق)، وتاريخ الانضمام.
+  * شريط بحث وفلاتر بحسب الصفة (الكل / رئيس الاتحاد / الملاك).
+  * زر تصدير سجل العمارة بالكامل كملف **CSV** بترميز عربي UTF-8 BOM.
+* **القسم الثالث: قسم الدعم الفني والمتابعة (Technical Support - Read Only):**
+  * استعراض بلاغات الأعطال والصيانة الخاصة بالعمارة (Issues).
+  * استعراض المطالبات الطارئة (Emergency Claims).
+  * استعراض كشف إيصالات ومدفوعات السكان (Payments).
+
+### د. دليل المستخدمين ورؤساء الاتحاد المطور ([`src/app/users/page.tsx`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/app/users/page.tsx))
+* **كروت إحصائية بالأعلى:** إجمالي المستخدمين، رؤساء الاتحاد، الملاك، والحسابات المعلقة بانتظار التفعيل.
+* **عرض البريد الإلكتروني (Email):** عمود صريح يعرض الإيميل الرسمي المسجل به كل مستخدم في النظام مع زر النسخ ورابط `mailto:`.
+* **أزرار التواصل المباشر:**
+  * زر اتصال هاتفي مباشر `tel:`.
+  * زر **واتساب مباشر** يفتح شات الواتساب مع رقم المستخدم فوراً بضغطة زر.
+  * زر نسخ رقم الهاتف.
+* **التسجيل وآخر نشاط:** عمود يعرض تاريخ التسجيل (`created_at`) وتاريخ آخر تحديث (`updated_at`).
+* **ربط مباشر بالعمارة:** اسم العمارة أصبح رابطاً تفاعلياً ينقل مباشرة لصفحة سجل وتفاصيل تلك العمارة (`/buildings/[id]`).
+* **تصدير كشف المستخدمين (CSV):** زر علوي لتصدير جدول المستخدمين بالكامل مع دعم اللغة العربية.
+* فلترة حسب الدور وحالة الحساب مع قائمة منسدلة لتغيير الحالة فوراً (`active`, `pending`, `suspended`, `rejected`).
+
+### هـ. مركز مراجعة فواتير اشتراك التطبيق والتفعيل الذكي ([`src/app/invoices/page.tsx`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/app/invoices/page.tsx))
 * استعراض جميع الفواتير المرفوعة من رؤساء الاتحاد في جدول `app_subscription_invoices`.
 * **نافذة تكبير صورة إيصال التحويل (`High-Res Receipt Preview Modal`)** من سلة `subscription-receipts` مع تفاصيل المبلغ وعدد الأشهر المطلوبة.
 * **زر "اعتماد وتفعيل الاشتراك" (`activate_building_subscription` RPC):**
@@ -64,11 +106,8 @@
   3. إدراج مصروف تلقائي في ميزانية العمارة (`expenses`) بعنوان *"رسوم اشتراك تطبيق إدارة العقار"* وخصم قيمته من رصيد خزينة العمارة (`fund_balance`) وإرفاق نفس صورة الإيصال ليظهر للسكان في لوحة الشفافية.
 * **زر "رفض الإيصال":** يفتح نافذة إدخال **سبب الرفض** ليظهر لرئيس الاتحاد في إشعارات التطبيق.
 
-### د. إدارة قوالب الباقات العامة ([`src/app/plans/page.tsx`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/app/plans/page.tsx))
+### و. إدارة قوالب الباقات العامة ([`src/app/plans/page.tsx`](file:///d:/WorkSpace/اتحاد ملاك/admin-dashboard/src/app/plans/page.tsx))
 * شاشة للتحكم المباشر في جدول `subscription_plans` لتعديل الأسعار الشهرية الافتراضية، الحدود القصوى للشقق، والمميزات الافتراضية للباقات الثلاث (`free`, `pro`, `plus`).
-
-### هـ. دليل المستخدمين ورؤساء الاتحاد ([`src/app/users/page.tsx`](file:///d:/WorkSpace/%D8%A7%D8%AA%D8%AD%D8%A7%D8%AF%20%D9%85%D9%84%D8%A7%D9%83/admin-dashboard/src/app/users/page.tsx))
-* عرض قائمة المستخدمين ورؤساء الاتحاد مع بحث فوري بالاسم أو رقم الهاتف أو العمارة، وفلترة حسب الدور وحالة الحساب (`active`, `pending`, `suspended`, `rejected`) مع إمكانية تعديل حالة الحساب مباشرة.
 
 ---
 
@@ -76,10 +115,10 @@
 
 ```text
 admin-dashboard/
-├── DASHBOARD_DOCUMENTATION.md        # هذا الملف: التوثيق المستقل الشامل للوحة تحكم الويب
-├── package.json                      # مكتبات الويب المستقلة (Next.js, React, Tailwind, Supabase, Lucide)
+├── DASHBOARD_DOCUMENTATION.md        # التوثيق الشامل والمحدث للوحة تحكم الويب
+├── package.json                      # مكتبات الويب المستقلة (Next.js 14, React 18, Tailwind, Supabase, Lucide)
 ├── tsconfig.json                     # إعدادات TypeScript الخاصة بـ Next.js
-├── tailwind.config.ts                # إعدادات الهوية اللونية (#1E293B, #10B981, #F97316, #F59E0B, #EF4444, #F8FAFC)
+├── tailwind.config.ts                # إعدادات الهوية اللونية المعتمدة
 ├── postcss.config.mjs                # إعدادات PostCSS
 ├── next.config.mjs                   # إعدادات Next.js والسماح بصور Supabase Storage
 ├── .env.local                        # متغيرات اتصال Supabase (NEXT_PUBLIC_SUPABASE_URL & KEY)
@@ -89,7 +128,7 @@ admin-dashboard/
     ├── lib/
     │   └── supabase.ts               # عميل Supabase ودوال الـ RPC المؤمنة لـ super_admin
     ├── context/
-    │   └── DashboardContext.tsx      # إدارة الحالة المركزية، حارس صلاحية super_admin، والربط اللحظي بـ Supabase
+    │   └── DashboardContext.tsx      # إدارة الحالة المركزية، حارس الجلسة الحقيقي، والربط اللحظي بـ Supabase
     ├── components/
     │   └── layout/
     │       └── DashboardShell.tsx    # التخطيط العام (Sidebar RTL + Header + شاشة تسجيل الدخول المحمية)
@@ -98,13 +137,15 @@ admin-dashboard/
         ├── layout.tsx                # الجذر العام للتطبيق (dir="rtl" lang="ar")
         ├── page.tsx                  # (أ) الصفحة الرئيسية: الإحصائيات العامة (Overview & KPIs)
         ├── buildings/
-        │   └── page.tsx              # (ب) إدارة العمارات والتخصيص المرن (Buildings & Custom Overrides Drawer/Modal)
+        │   ├── page.tsx              # (ب) إدارة العمارات والتخصيص المرن وروابط السجل السريع
+        │   └── [id]/
+        │       └── page.tsx          # (ج) صفحة تفاصيل وسجل العمارة، بيانات رئيس الاتحاد، وأزرار الواتساب والاتصال
         ├── invoices/
-        │   └── page.tsx              # (ج) مركز مراجعة فواتير اشتراك التطبيق والتفعيل الذكي (Subscription Invoices)
+        │   └── page.tsx              # (د) مركز مراجعة فواتير اشتراك التطبيق والتفعيل الذكي
         ├── plans/
-        │   └── page.tsx              # (د) إدارة قوالب الباقات العامة (Global Subscription Plans)
+        │   └── page.tsx              # (هـ) إدارة قوالب الباقات العامة (Global Subscription Plans)
         └── users/
-            └── page.tsx              # (هـ) دليل المستخدمين ورؤساء الاتحاد (Users Directory)
+            └── page.tsx              # (و) دليل المستخدمين ورؤساء الاتحاد المطور مع الإيميل والواتساب وCSV
 ```
 
 ---
@@ -126,22 +167,25 @@ npm run dev
 
 ## 📊 6. سجل التقدم وحالة بناء الوحدات (Progress Log)
 
-- [x] **الخطوة 1:** إنشاء مجلد `admin-dashboard/` وملف التوثيق المستقل `admin-dashboard/DASHBOARD_DOCUMENTATION.md`.
-- [x] **الخطوة 2:** تهيئة ملفات مشروع Next.js (`package.json`, `tsconfig.json`, `tailwind.config.ts`, `.env.local`).
-- [x] **الخطوة 3:** إعداد اتصال Supabase (`src/lib/supabase.ts`) وحارس الصلاحيات الصارم (`role === 'super_admin'`) في `src/context/DashboardContext.tsx`.
-- [x] **الخطوة 4:** بناء التخطيط العام (`Sidebar + Header RTL`) والصفحات الخمس بالكامل:
-  - [x] أ. الصفحة الرئيسية: الإحصائيات العامة (`Overview & KPIs`)
-  - [x] ب. إدارة العمارات والتخصيص المرن (`Buildings & Custom Overrides Management`)
-  - [x] ج. مركز مراجعة فواتير اشتراك التطبيق والتفعيل الذكي (`Subscription Invoices & Auto-Expense`)
-  - [x] د. إدارة قوالب الباقات العامة (`Global Subscription Plans`)
-  - [x] هـ. دليل المستخدمين ورؤساء الاتحاد (`Users Directory`)
-- [x] **الخطوة 5:** تثبيت الحزم وفحص `TypeScript` وتحديث التوثيق النهائي.
-- [x] **الخطوة 6 (إصلاح وتفعيل التوجيهات والأزرار بالكامل):**
-  - مطابقة أنواع البيانات المشتركة بين صفحات الداشبورد وقاعدة البيانات (`floor_number`, `claim.target_amount`, `obligation.status === 'unpaid'`).
-  - فحص TypeScript شامل وتصفير كافة أخطاء التحقق (`tsc --noEmit` exited with 0).
-  - التأكد من استجابة كافة المسارات الرئيسية (`/`, `/buildings`, `/invoices`, `/plans`, `/users`) بحالة `200 OK`.
-- [x] **الخطوة 7 (المصادقة الفورية للإدارة العليا One-Click Super Admin):**
-  - تفعيل الدخول المباشر بنقرة واحدة عبر زر `⚡ دخول مباشر وفوري كمدير عام (Super Admin)` بالبيانات المعتمدة `superadmin@ittihad.app` / `[REDACTED-password]`.
-  - التحقق التلقائي في الخلفية على مستوى `DashboardContext` لمنع أي خروج مفاجئ للجلسة.
-- [x] **الخطوة 8 (أدوات الحذف والتصفير السريع للمدير العام):**
-  - تفعيل الربط مع دالة `reset_building_data` وتمرير مفتاح التجاوز `p_secret_key: '[REDACTED-reset-key]'` لدعم تصفير السكان أو حذف العمارة بالكامل بنقرة واحدة لتسهيل وتيرة الاختبار والتطوير.
+- [x] **الخطوة 1:** إنشاء مجلد `admin-dashboard/` وتوثيق البنية المعمارية المستقلة.
+- [x] **الخطوة 2:** تهيئة ملفات مشروع Next.js وضبط الهوية البصرية الرسمية.
+- [x] **الخطوة 3:** إعداد اتصال Supabase ودوال الـ RPC المؤمنة مع حارس الجلسة الصارم (`super_admin`).
+- [x] **الخطوة 4:** بناء الصفحات الرئيسية: الإحصائيات العامة، العمارات، الفواتير، والباقات.
+- [x] **الخطوة 5:** أدوات الحذف والتصفير السريع للمدير العام (`reset_building_data`).
+- [x] **الخطوة 6 (التحديث الأمني ومنع البيانات الوهمية):**
+  - إزالة أي دخول تلقائي أو بيانات وهمية fallback.
+  - إلزام تسجيل دخول السوبر أدمن الحقيقي لعرض بيانات Supabase الواقعية تحت مظلة RLS.
+  - رفع سقف الاستعلامات إلى 5000 صف لمنع حجب البيانات بعد الـ 1000 سجل الأولى.
+- [x] **الخطوة 7 (تطوير دليل المستخدمين):**
+  - إضافة عمود البريد الإلكتروني (Email) مع زر النسخ والمراسلة.
+  - إضافة زر اتصال هاتفي وزر واتساب مباشر (`wa.me`) لكل مستخدم.
+  - إضافة تاريخ التسجيل وتاريخ آخر نشاط (`created_at` و `updated_at`).
+  - إضافة ميزة تصدير الكشف إلى ملف CSV يدعم اللغة العربية UTF-8 BOM.
+- [x] **الخطوة 8 (صفحة تفاصيل العمارة وسجل الملاك الكامل):**
+  - إنشاء مسار ديناميكي كامل `/buildings/[id]`.
+  - إبراز بيانات رئيس الاتحاد مع أزرار الاتصال الهاتفي والواتساب المباشر والإيميل.
+  - مؤشرات سعة الشقق، نسبة الإشغال، السكان المفعلين والمعلقين، ورصيد الخزينة.
+  - أزرار تحكم سريعة: تمديد الاشتراك 30 يوم، وإيقاف أو تفعيل العمارة.
+  - جدول سجل الملاك مع شارة التمييز (رئيس اتحاد vs مالك/ساكن) وتصدير CSV.
+  - قسم قراءة فقط للدعم الفني (Technical Support Read-Only) للبلاغات والمطالبات والمدفوعات.
+- [x] **الخطوة 9:** فحص `TypeScript` كامل وتحديث التوثيق الرسمي الشامل بنجاح (`tsc --noEmit` & `next build` 100% Passed).
