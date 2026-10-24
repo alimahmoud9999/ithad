@@ -42,6 +42,7 @@ export interface Building {
   admin_id?: string | null;
   admin_name?: string;
   admin_phone?: string;
+  admin_email?: string;
   fund_balance: number;
   default_monthly_dues: number;
   total_apartments: number;
@@ -89,9 +90,11 @@ export interface UserProfile {
   status: AccountStatus;
   apartment_number?: string | null;
   floor_number?: string | null;
+  residency_type?: string | null;
   ownership_share_percent?: number;
   push_token?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Expense {

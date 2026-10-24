@@ -172,20 +172,20 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [currentAdmin, setCurrentAdmin] = useState<UserProfile | null>(
-    INITIAL_USERS[0]
+    null
   );
   const [isAuthorizedSuperAdmin, setIsAuthorizedSuperAdmin] =
-    useState<boolean>(true);
+    useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(false);
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
   const [isLiveSupabaseConnected, setIsLiveSupabaseConnected] =
     useState<boolean>(isSupabaseConfigured);
 
   const [plans, setPlans] = useState<SubscriptionPlan[]>(INITIAL_PLANS);
-  const [buildings, setBuildings] = useState<Building[]>(INITIAL_BUILDINGS);
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [invoices, setInvoices] =
     useState<AppSubscriptionInvoice[]>(INITIAL_INVOICES);
-  const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [apartmentObligations, setApartmentObligations] = useState<
     ApartmentObligation[]
@@ -235,13 +235,13 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
         pollsRes,
       ] = await Promise.all([
         supabase.from('subscription_plans').select('*').order('default_monthly_price'),
-        supabase.from('buildings').select('*').order('created_at', { ascending: false }),
+        supabase.from('buildings').select('*').order('created_at', { ascending: false }).limit(5000),
         supabase
           .from('app_subscription_invoices')
           .select('*')
           .order('created_at', { ascending: false }),
-        supabase.from('users').select('*').order('created_at', { ascending: false }),
-        supabase.from('apartments').select('*').order('apartment_number'),
+        supabase.from('users').select('*').order('created_at', { ascending: false }).limit(5000),
+        supabase.from('apartments').select('*').order('apartment_number').limit(5000),
         supabase.from('apartment_obligations').select('*').order('created_at', { ascending: false }),
         supabase.from('emergency_claims').select('*').order('created_at', { ascending: false }),
         supabase.from('payments').select('*').order('created_at', { ascending: false }),
@@ -266,6 +266,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
             ...b,
             admin_name: adminUser?.full_name || b.admin_name || 'رئيس الاتحاد',
             admin_phone: adminUser?.phone || b.admin_phone || '-',
+            admin_email: adminUser?.email || (b as any).admin_email || '-',
             registered_apartments_count: bApts.length,
           };
         });
@@ -315,7 +316,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
 
     async function initAdminSession() {
       if (!isSupabaseConfigured) {
-        refreshFromSupabase();
+        setIsLoadingAuth(false);
         return;
       }
 
@@ -327,9 +328,10 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
         if (session?.user) {
           const check = await verifySuperAdminRole();
           if (check.authorized && isMounted) {
-            setCurrentAdmin(check.profile || INITIAL_USERS[0]);
+            setCurrentAdmin(check.profile || null);
             setIsAuthorizedSuperAdmin(true);
-            refreshFromSupabase();
+            await refreshFromSupabase();
+            setIsLoadingAuth(false);
             return;
           }
         }
@@ -338,7 +340,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       if (isMounted) {
-        refreshFromSupabase();
+        setIsLoadingAuth(false);
       }
     }
 
@@ -372,13 +374,17 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
       const check = await verifySuperAdminRole();
       if (!check.authorized) {
         setIsAuthorizedSuperAdmin(false);
+    setBuildings([]);
+    setUsers([]);
+    setInvoices([]);
+    setApartments([]);
         setCurrentAdmin(null);
         setAuthError(check.errorMessage || UNAUTHORIZED_ROLE_MESSAGE);
         setIsLoadingAuth(false);
         return false;
       }
 
-      setCurrentAdmin(check.profile || INITIAL_USERS[0]);
+      setCurrentAdmin(check.profile || null);
       setIsAuthorizedSuperAdmin(true);
       await refreshFromSupabase();
       showToast('تم التحقق من صلاحية الإدارة العليا (super_admin) بنجاح', 'success');
@@ -395,6 +401,10 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
   // Only ever revokes UI access; granting it must go through signInAsSuperAdmin
   const simulateRoleAttempt = (_role: 'super_admin' | 'admin' | 'resident') => {
     setIsAuthorizedSuperAdmin(false);
+    setBuildings([]);
+    setUsers([]);
+    setInvoices([]);
+    setApartments([]);
     setCurrentAdmin(null);
     setAuthError(UNAUTHORIZED_ROLE_MESSAGE);
     showToast(UNAUTHORIZED_ROLE_MESSAGE, 'error');
@@ -405,6 +415,10 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({
       await supabase.auth.signOut();
     }
     setIsAuthorizedSuperAdmin(false);
+    setBuildings([]);
+    setUsers([]);
+    setInvoices([]);
+    setApartments([]);
     setCurrentAdmin(null);
   };
 
